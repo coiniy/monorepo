@@ -2,7 +2,7 @@ package application
 
 import (
 	"bytes"
-	"crypto/sha512"
+	"encoding/binary"
 	"encoding/gob"
 	"math/big"
 
@@ -42,7 +42,7 @@ type Vertex interface {
 	GetAppAddress() [32]byte
 	GetDataAddress() [32]byte
 	ToBytes() []byte
-	GetData() []Encrypted
+	GetData(func(id []byte) ([]Encrypted, error)) ([]Encrypted, error)
 	GetSize() *big.Int
 	Commit() []byte
 }
@@ -64,8 +64,8 @@ type Hyperedge interface {
 type vertex struct {
 	appAddress  [32]byte
 	dataAddress [32]byte
-	data        []Encrypted
-	dataTree    *crypto.VectorCommitmentTree
+	commitment  []byte
+	size        *big.Int
 }
 
 type hyperedge struct {
@@ -89,31 +89,50 @@ type Atom interface {
 	Commit() []byte
 }
 
-func atomFromBytes(data []byte) Atom {
-	tree := &crypto.VectorCommitmentTree{}
-	var b bytes.Buffer
-	b.Write(data[65:])
-	dec := gob.NewDecoder(&b)
-	if err := dec.Decode(tree); err != nil {
+func EncryptedToVertexTree(encrypted []Encrypted) *crypto.VectorCommitmentTree {
+	dataTree := &crypto.VectorCommitmentTree{}
+	for i, d := range encrypted {
+		dataBytes := d.ToBytes()
+		id := binary.BigEndian.AppendUint64([]byte{}, uint64(i))
+		dataTree.Insert(
+			id,
+			dataBytes,
+			d.GetStatement(),
+			big.NewInt(int64(len(encrypted)*54)),
+		)
+	}
+	dataTree.Commit(false)
+	return dataTree
+}
+
+func AtomFromBytes(data []byte) Atom {
+	if len(data) == 0 {
 		return nil
 	}
 
 	if data[0] == 0x00 {
-		encData := []Encrypted{}
-		for _, d := range crypto.GetAllLeaves(tree) {
-			verencData := crypto.MPCitHVerEncFromBytes(d.Value)
-			encData = append(encData, verencData)
+		if len(data) < 161 {
+			return nil
 		}
+
 		return &vertex{
 			appAddress:  [32]byte(data[1:33]),
 			dataAddress: [32]byte(data[33:65]),
-			data:        encData,
-			dataTree:    tree,
+			commitment:  data[65 : len(data)-32],
+			size:        new(big.Int).SetBytes(data[len(data)-32:]),
 		}
 	} else {
+		tree := &crypto.VectorCommitmentTree{}
+		var b bytes.Buffer
+		b.Write(data[65:])
+		dec := gob.NewDecoder(&b)
+		if err := dec.Decode(tree); err != nil {
+			return nil
+		}
+
 		extrinsics := make(map[[64]byte]Atom)
-		for _, a := range crypto.GetAllLeaves(tree) {
-			atom := atomFromBytes(a.Value)
+		for _, a := range crypto.GetAllPreloadedLeaves(tree) {
+			atom := AtomFromBytes(a.Value)
 			extrinsics[[64]byte(a.Key)] = atom
 		}
 		return &hyperedge{
@@ -128,19 +147,14 @@ func atomFromBytes(data []byte) Atom {
 func NewVertex(
 	appAddress [32]byte,
 	dataAddress [32]byte,
-	data []Encrypted,
+	commitment []byte,
+	size *big.Int,
 ) Vertex {
-	dataTree := &crypto.VectorCommitmentTree{}
-	for _, d := range data {
-		dataBytes := d.ToBytes()
-		id := sha512.Sum512(dataBytes)
-		dataTree.Insert(id[:], dataBytes, d.GetStatement(), big.NewInt(int64(len(data)*54)))
-	}
 	return &vertex{
 		appAddress,
 		dataAddress,
-		data,
-		dataTree,
+		commitment,
+		size,
 	}
 }
 
@@ -164,7 +178,7 @@ func (v *vertex) GetID() [64]byte {
 }
 
 func (v *vertex) GetSize() *big.Int {
-	return big.NewInt(int64(len(v.data) * 54))
+	return v.size
 }
 
 func (v *vertex) GetAtomType() AtomType {
@@ -186,30 +200,31 @@ func (v *vertex) GetDataAddress() [32]byte {
 	return v.dataAddress
 }
 
-func (v *vertex) GetData() []Encrypted {
-	return v.data
+func (v *vertex) GetData(
+	retrievalFunc func(id []byte) ([]Encrypted, error),
+) ([]Encrypted, error) {
+	id := v.GetID()
+	return retrievalFunc(id[:])
 }
 
 func (v *vertex) ToBytes() []byte {
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	if err := enc.Encode(v.dataTree); err != nil {
-		return nil
-	}
 	return append(
 		append(
 			append(
-				[]byte{0x00},
-				v.appAddress[:]...,
+				append(
+					[]byte{0x00},
+					v.appAddress[:]...,
+				),
+				v.dataAddress[:]...,
 			),
-			v.dataAddress[:]...,
+			v.commitment[:]...,
 		),
-		buf.Bytes()...,
+		v.size.FillBytes(make([]byte, 32))...,
 	)
 }
 
 func (v *vertex) Commit() []byte {
-	return v.dataTree.Commit(false)
+	return v.commitment
 }
 
 func (h *hyperedge) GetID() [64]byte {
@@ -294,11 +309,6 @@ type ShardAddress struct {
 	L3 [32]byte
 }
 
-type ShardKey struct {
-	L1 [3]byte
-	L2 [32]byte
-}
-
 func GetShardAddress(a Atom) ShardAddress {
 	appAddress := a.GetAppAddress()
 	dataAddress := a.GetDataAddress()
@@ -310,58 +320,81 @@ func GetShardAddress(a Atom) ShardAddress {
 	}
 }
 
-func GetShardKey(a Atom) ShardKey {
+func GetShardKey(a Atom) crypto.ShardKey {
 	s := GetShardAddress(a)
-	return ShardKey{L1: s.L1, L2: s.L2}
+	return crypto.ShardKey{L1: s.L1, L2: s.L2}
 }
 
 type IdSet struct {
 	dirty    bool
 	atomType AtomType
 	atoms    map[[64]byte]Atom
-	tree     *crypto.VectorCommitmentTree
+	tree     *crypto.LazyVectorCommitmentTree
 }
 
-func NewIdSet(atomType AtomType) *IdSet {
+func NewIdSet(
+	atomType AtomType,
+	phaseType PhaseType,
+	shardKey crypto.ShardKey,
+	store crypto.TreeBackingStore,
+) *IdSet {
 	return &IdSet{
 		dirty:    false,
 		atomType: atomType,
 		atoms:    make(map[[64]byte]Atom),
-		tree:     &crypto.VectorCommitmentTree{},
+		tree: &crypto.LazyVectorCommitmentTree{
+			SetType:   string(atomType),
+			PhaseType: string(phaseType),
+			ShardKey:  shardKey,
+			Store:     store,
+		},
 	}
 }
 
-func (set *IdSet) FromBytes(treeData []byte) error {
-	set.tree = &crypto.VectorCommitmentTree{}
-	var b bytes.Buffer
-	b.Write(treeData)
-	dec := gob.NewDecoder(&b)
-	if err := dec.Decode(set.tree); err != nil {
-		return errors.Wrap(err, "load set")
+func (set *IdSet) FromBytes(
+	atomType AtomType,
+	phaseType PhaseType,
+	shardKey crypto.ShardKey,
+	store crypto.TreeBackingStore,
+	treeData []byte,
+) ([]Atom, error) {
+	var err error
+	set.tree, err = crypto.DeserializeTree(
+		string(atomType),
+		string(phaseType),
+		shardKey,
+		store,
+		treeData,
+	)
+	leaves := crypto.ConvertAllPreloadedLeaves(
+		string(atomType),
+		string(phaseType),
+		shardKey,
+		store,
+		set.tree.Root,
+		[]int{},
+	)
+	atoms := []Atom{}
+	for _, leaf := range leaves {
+		atom := AtomFromBytes(leaf.Value)
+		atoms = append(atoms, atom)
 	}
 
-	for _, leaf := range crypto.GetAllLeaves(set.tree.Root) {
-		set.atoms[[64]byte(leaf.Key)] = atomFromBytes(leaf.Value)
-	}
-
-	return nil
+	return atoms, errors.Wrap(err, "from bytes")
 }
 
 func (set *IdSet) IsDirty() bool {
 	return set.dirty
 }
 
-func (set *IdSet) ToBytes() []byte {
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	if err := enc.Encode(set.tree); err != nil {
-		return nil
-	}
-
-	return buf.Bytes()
+func (set *IdSet) ToBytes() ([]byte, error) {
+	return crypto.SerializeTree(set.tree)
 }
 
-func (set *IdSet) Add(atom Atom) error {
+func (set *IdSet) Add(
+	txn crypto.TreeBackingStoreTransaction,
+	atom Atom,
+) error {
 	if atom.GetAtomType() != set.atomType {
 		return ErrInvalidAtomType
 	}
@@ -369,7 +402,13 @@ func (set *IdSet) Add(atom Atom) error {
 	id := atom.GetID()
 	set.atoms[id] = atom
 	set.dirty = true
-	return set.tree.Insert(id[:], atom.ToBytes(), atom.Commit(), atom.GetSize())
+	return set.tree.Insert(
+		txn,
+		id[:],
+		atom.ToBytes(),
+		atom.Commit(),
+		atom.GetSize(),
+	)
 }
 
 func (set *IdSet) GetSize() *big.Int {
@@ -380,87 +419,96 @@ func (set *IdSet) GetSize() *big.Int {
 	return size
 }
 
-func (set *IdSet) Delete(atom Atom) bool {
-	if atom.GetAtomType() != set.atomType {
-		return false
-	}
-
-	id := atom.GetID()
-	if err := set.tree.Delete(id[:]); err != nil {
-		return false
-	}
-
-	set.dirty = true
-	delete(set.atoms, id)
-
-	return true
+func (set *IdSet) Has(key [64]byte) bool {
+	_, err := set.tree.Store.GetNodeByKey(
+		set.tree.SetType,
+		set.tree.PhaseType,
+		set.tree.ShardKey,
+		key[:],
+	)
+	return err == nil
 }
 
-func (set *IdSet) Has(key [64]byte) bool {
-	_, ok := set.atoms[key]
-	return ok
+func (set *IdSet) GetTree() *crypto.LazyVectorCommitmentTree {
+	return set.tree
 }
 
 type Hypergraph struct {
 	size             *big.Int
-	vertexAdds       map[ShardKey]*IdSet
-	vertexRemoves    map[ShardKey]*IdSet
-	hyperedgeAdds    map[ShardKey]*IdSet
-	hyperedgeRemoves map[ShardKey]*IdSet
+	vertexAdds       map[crypto.ShardKey]*IdSet
+	vertexRemoves    map[crypto.ShardKey]*IdSet
+	hyperedgeAdds    map[crypto.ShardKey]*IdSet
+	hyperedgeRemoves map[crypto.ShardKey]*IdSet
+	store            crypto.TreeBackingStore
 }
 
-func NewHypergraph() *Hypergraph {
+func NewHypergraph(store crypto.TreeBackingStore) *Hypergraph {
 	return &Hypergraph{
 		size:             big.NewInt(0),
-		vertexAdds:       make(map[ShardKey]*IdSet),
-		vertexRemoves:    make(map[ShardKey]*IdSet),
-		hyperedgeAdds:    make(map[ShardKey]*IdSet),
-		hyperedgeRemoves: make(map[ShardKey]*IdSet),
+		vertexAdds:       make(map[crypto.ShardKey]*IdSet),
+		vertexRemoves:    make(map[crypto.ShardKey]*IdSet),
+		hyperedgeAdds:    make(map[crypto.ShardKey]*IdSet),
+		hyperedgeRemoves: make(map[crypto.ShardKey]*IdSet),
+		store:            store,
 	}
 }
 
-func (hg *Hypergraph) GetVertexAdds() map[ShardKey]*IdSet {
+func (hg *Hypergraph) GetVertexAdds() map[crypto.ShardKey]*IdSet {
 	return hg.vertexAdds
 }
 
-func (hg *Hypergraph) GetVertexRemoves() map[ShardKey]*IdSet {
+func (hg *Hypergraph) GetVertexRemoves() map[crypto.ShardKey]*IdSet {
 	return hg.vertexRemoves
 }
 
-func (hg *Hypergraph) GetHyperedgeAdds() map[ShardKey]*IdSet {
+func (hg *Hypergraph) GetHyperedgeAdds() map[crypto.ShardKey]*IdSet {
 	return hg.hyperedgeAdds
 }
 
-func (hg *Hypergraph) GetHyperedgeRemoves() map[ShardKey]*IdSet {
+func (hg *Hypergraph) GetHyperedgeRemoves() map[crypto.ShardKey]*IdSet {
 	return hg.hyperedgeRemoves
 }
 
 func (hg *Hypergraph) Commit() [][]byte {
 	commits := [][]byte{}
 	for _, vertexAdds := range hg.vertexAdds {
-		commits = append(commits, vertexAdds.tree.Commit(false))
+		root := vertexAdds.tree.Commit(false)
+		commits = append(commits, root)
 	}
 	for _, vertexRemoves := range hg.vertexRemoves {
-		commits = append(commits, vertexRemoves.tree.Commit(false))
+		root := vertexRemoves.tree.Commit(false)
+		commits = append(commits, root)
 	}
 	for _, hyperedgeAdds := range hg.hyperedgeAdds {
-		commits = append(commits, hyperedgeAdds.tree.Commit(false))
+		root := hyperedgeAdds.tree.Commit(false)
+		commits = append(commits, root)
 	}
 	for _, hyperedgeRemoves := range hg.hyperedgeRemoves {
-		commits = append(commits, hyperedgeRemoves.tree.Commit(false))
+		root := hyperedgeRemoves.tree.Commit(false)
+		commits = append(commits, root)
 	}
 	return commits
 }
 
-func (hg *Hypergraph) ImportFromBytes(
+func (hg *Hypergraph) ImportTree(
 	atomType AtomType,
 	phaseType PhaseType,
-	shardKey ShardKey,
-	data []byte,
+	shardKey crypto.ShardKey,
+	root crypto.LazyVectorCommitmentNode,
+	store crypto.TreeBackingStore,
 ) error {
-	set := NewIdSet(atomType)
-	if err := set.FromBytes(data); err != nil {
-		return errors.Wrap(err, "import from bytes")
+	set := NewIdSet(
+		atomType,
+		phaseType,
+		shardKey,
+		store,
+	)
+	set.tree = &crypto.LazyVectorCommitmentTree{
+		Root:      root,
+		SetType:   string(atomType),
+		PhaseType: string(phaseType),
+		ShardKey:  shardKey,
+		Store:     store,
 	}
 
 	switch atomType {
@@ -492,33 +540,51 @@ func (hg *Hypergraph) GetSize() *big.Int {
 }
 
 func (hg *Hypergraph) getOrCreateIdSet(
-	shardAddr ShardKey,
-	addMap map[ShardKey]*IdSet,
-	removeMap map[ShardKey]*IdSet,
+	shardAddr crypto.ShardKey,
+	addMap map[crypto.ShardKey]*IdSet,
+	removeMap map[crypto.ShardKey]*IdSet,
 	atomType AtomType,
+	phaseType PhaseType,
 ) (*IdSet, *IdSet) {
 	if _, ok := addMap[shardAddr]; !ok {
-		addMap[shardAddr] = NewIdSet(atomType)
+		addMap[shardAddr] = NewIdSet(
+			atomType,
+			phaseType,
+			shardAddr,
+			hg.store,
+		)
 	}
 	if _, ok := removeMap[shardAddr]; !ok {
-		removeMap[shardAddr] = NewIdSet(atomType)
+		removeMap[shardAddr] = NewIdSet(
+			atomType,
+			phaseType,
+			shardAddr,
+			hg.store,
+		)
 	}
 	return addMap[shardAddr], removeMap[shardAddr]
 }
 
-func (hg *Hypergraph) AddVertex(v Vertex) error {
+func (hg *Hypergraph) AddVertex(
+	txn crypto.TreeBackingStoreTransaction,
+	v Vertex,
+) error {
 	shardAddr := GetShardKey(v)
 	addSet, _ := hg.getOrCreateIdSet(
 		shardAddr,
 		hg.vertexAdds,
 		hg.vertexRemoves,
 		VertexAtomType,
+		AddsPhaseType,
 	)
 	hg.size.Add(hg.size, v.GetSize())
-	return errors.Wrap(addSet.Add(v), "add vertex")
+	return errors.Wrap(addSet.Add(txn, v), "add vertex")
 }
 
-func (hg *Hypergraph) AddHyperedge(h Hyperedge) error {
+func (hg *Hypergraph) AddHyperedge(
+	txn crypto.TreeBackingStoreTransaction,
+	h Hyperedge,
+) error {
 	if !hg.LookupAtomSet(&h.(*hyperedge).extrinsics) {
 		return ErrMissingExtrinsics
 	}
@@ -528,16 +594,20 @@ func (hg *Hypergraph) AddHyperedge(h Hyperedge) error {
 		hg.hyperedgeAdds,
 		hg.hyperedgeRemoves,
 		HyperedgeAtomType,
+		AddsPhaseType,
 	)
 	id := h.GetID()
 	if !removeSet.Has(id) {
 		hg.size.Add(hg.size, h.GetSize())
-		return errors.Wrap(addSet.Add(h), "add hyperedge")
+		return errors.Wrap(addSet.Add(txn, h), "add hyperedge")
 	}
 	return nil
 }
 
-func (hg *Hypergraph) RemoveVertex(v Vertex) error {
+func (hg *Hypergraph) RemoveVertex(
+	txn crypto.TreeBackingStoreTransaction,
+	v Vertex,
+) error {
 	shardKey := GetShardKey(v)
 	if !hg.LookupVertex(v.(*vertex)) {
 		addSet, removeSet := hg.getOrCreateIdSet(
@@ -545,11 +615,12 @@ func (hg *Hypergraph) RemoveVertex(v Vertex) error {
 			hg.vertexAdds,
 			hg.vertexRemoves,
 			VertexAtomType,
+			AddsPhaseType,
 		)
-		if err := addSet.Add(v); err != nil {
+		if err := addSet.Add(txn, v); err != nil {
 			return errors.Wrap(err, "remove vertex")
 		}
-		return errors.Wrap(removeSet.Add(v), "remove vertex")
+		return errors.Wrap(removeSet.Add(txn, v), "remove vertex")
 	}
 
 	id := v.GetID()
@@ -568,13 +639,17 @@ func (hg *Hypergraph) RemoveVertex(v Vertex) error {
 		hg.vertexAdds,
 		hg.vertexRemoves,
 		VertexAtomType,
+		RemovesPhaseType,
 	)
 	hg.size.Sub(hg.size, v.GetSize())
-	err := removeSet.Add(v)
+	err := removeSet.Add(txn, v)
 	return err
 }
 
-func (hg *Hypergraph) RemoveHyperedge(h Hyperedge) error {
+func (hg *Hypergraph) RemoveHyperedge(
+	txn crypto.TreeBackingStoreTransaction,
+	h Hyperedge,
+) error {
 	shardKey := GetShardKey(h)
 	wasPresent := hg.LookupHyperedge(h.(*hyperedge))
 	if !wasPresent {
@@ -583,12 +658,13 @@ func (hg *Hypergraph) RemoveHyperedge(h Hyperedge) error {
 			hg.hyperedgeAdds,
 			hg.hyperedgeRemoves,
 			HyperedgeAtomType,
+			AddsPhaseType,
 		)
-		if err := addSet.Add(h); err != nil {
+		if err := addSet.Add(txn, h); err != nil {
 			return errors.Wrap(err, "remove hyperedge")
 		}
 
-		return errors.Wrap(removeSet.Add(h), "remove hyperedge")
+		return errors.Wrap(removeSet.Add(txn, h), "remove hyperedge")
 	}
 
 	id := h.GetID()
@@ -606,9 +682,10 @@ func (hg *Hypergraph) RemoveHyperedge(h Hyperedge) error {
 		hg.hyperedgeAdds,
 		hg.hyperedgeRemoves,
 		HyperedgeAtomType,
+		RemovesPhaseType,
 	)
 	hg.size.Sub(hg.size, h.GetSize())
-	err := removeSet.Add(h)
+	err := removeSet.Add(txn, h)
 	return err
 }
 
@@ -619,6 +696,7 @@ func (hg *Hypergraph) LookupVertex(v Vertex) bool {
 		hg.vertexAdds,
 		hg.vertexRemoves,
 		VertexAtomType,
+		AddsPhaseType,
 	)
 	id := v.GetID()
 	return addSet.Has(id) && !removeSet.Has(id)
@@ -631,6 +709,7 @@ func (hg *Hypergraph) LookupHyperedge(h Hyperedge) bool {
 		hg.hyperedgeAdds,
 		hg.hyperedgeRemoves,
 		HyperedgeAtomType,
+		AddsPhaseType,
 	)
 	id := h.GetID()
 	return hg.LookupAtomSet(&h.(*hyperedge).extrinsics) && addSet.Has(id) && !removeSet.Has(id)
@@ -671,38 +750,4 @@ func (hg *Hypergraph) Within(a, h Atom) bool {
 		}
 	}
 	return false
-}
-
-func (hg *Hypergraph) GetReconciledVertexSetForShard(
-	shardKey ShardKey,
-) *IdSet {
-	vertices := NewIdSet(VertexAtomType)
-
-	if addSet, ok := hg.vertexAdds[shardKey]; ok {
-		removeSet := hg.vertexRemoves[shardKey]
-		for id, v := range addSet.atoms {
-			if !removeSet.Has(id) {
-				vertices.Add(v)
-			}
-		}
-	}
-
-	return vertices
-}
-
-func (hg *Hypergraph) GetReconciledHyperedgeSetForShard(
-	shardKey ShardKey,
-) *IdSet {
-	hyperedges := NewIdSet(HyperedgeAtomType)
-
-	if addSet, ok := hg.hyperedgeAdds[shardKey]; ok {
-		removeSet := hg.hyperedgeRemoves[shardKey]
-		for _, h := range addSet.atoms {
-			if !removeSet.Has(h.GetID()) {
-				hyperedges.Add(h)
-			}
-		}
-	}
-
-	return hyperedges
 }

@@ -18,6 +18,7 @@ import (
 	"source.quilibrium.com/quilibrium/monorepo/node/keys"
 	"source.quilibrium.com/quilibrium/monorepo/node/p2p"
 	"source.quilibrium.com/quilibrium/monorepo/node/protobufs"
+	"source.quilibrium.com/quilibrium/monorepo/node/rpc"
 	"source.quilibrium.com/quilibrium/monorepo/node/store"
 )
 
@@ -47,7 +48,7 @@ func NewDebugNode(configConfig *config.Config, selfTestReport *protobufs.SelfTes
 	blossomSub := p2p.NewBlossomSub(p2PConfig, zapLogger)
 	frameProver := crypto.NewCachedWesolowskiFrameProver(zapLogger)
 	kzgInclusionProver := crypto.NewKZGInclusionProver(zapLogger)
-	pebbleHypergraphStore := store.NewPebbleHypergraphStore(pebbleDB, zapLogger)
+	pebbleHypergraphStore := store.NewPebbleHypergraphStore(dbConfig, pebbleDB, zapLogger)
 	engineConfig := configConfig.Engine
 	masterTimeReel := time.NewMasterTimeReel(zapLogger, pebbleClockStore, engineConfig, frameProver)
 	inMemoryPeerInfoManager := p2p.NewInMemoryPeerInfoManager(zapLogger)
@@ -55,6 +56,22 @@ func NewDebugNode(configConfig *config.Config, selfTestReport *protobufs.SelfTes
 	tokenExecutionEngine := token.NewTokenExecutionEngine(zapLogger, configConfig, fileKeyManager, blossomSub, frameProver, kzgInclusionProver, pebbleClockStore, pebbleDataProofStore, pebbleHypergraphStore, pebbleCoinStore, masterTimeReel, inMemoryPeerInfoManager, pebbleKeyStore, selfTestReport)
 	masterClockConsensusEngine := master.NewMasterClockConsensusEngine(engineConfig, zapLogger, pebbleClockStore, fileKeyManager, blossomSub, kzgInclusionProver, frameProver, masterTimeReel, inMemoryPeerInfoManager, selfTestReport)
 	node, err := newNode(zapLogger, pebbleDataProofStore, pebbleClockStore, pebbleCoinStore, fileKeyManager, blossomSub, tokenExecutionEngine, masterClockConsensusEngine, pebbleDB)
+	if err != nil {
+		return nil, err
+	}
+	return node, nil
+}
+
+func NewStrictSyncNode(configConfig *config.Config, selfTestReport *protobufs.SelfTestReport, synchronizer rpc.Synchronizer) (*Node, error) {
+	zapLogger := logger()
+	dbConfig := configConfig.DB
+	pebbleDB := store.NewPebbleDB(dbConfig)
+	pebbleDataProofStore := store.NewPebbleDataProofStore(pebbleDB, zapLogger)
+	pebbleClockStore := store.NewPebbleClockStore(pebbleDB, zapLogger)
+	pebbleCoinStore := store.NewPebbleCoinStore(pebbleDB, zapLogger)
+	keyConfig := configConfig.Key
+	fileKeyManager := keys.NewFileKeyManager(keyConfig, zapLogger)
+	node, err := newStrictSyncNode(zapLogger, pebbleDataProofStore, pebbleClockStore, pebbleCoinStore, fileKeyManager, pebbleDB, synchronizer)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +91,7 @@ func NewNode(configConfig *config.Config, selfTestReport *protobufs.SelfTestRepo
 	blossomSub := p2p.NewBlossomSub(p2PConfig, zapLogger)
 	frameProver := crypto.NewCachedWesolowskiFrameProver(zapLogger)
 	kzgInclusionProver := crypto.NewKZGInclusionProver(zapLogger)
-	pebbleHypergraphStore := store.NewPebbleHypergraphStore(pebbleDB, zapLogger)
+	pebbleHypergraphStore := store.NewPebbleHypergraphStore(dbConfig, pebbleDB, zapLogger)
 	engineConfig := configConfig.Engine
 	masterTimeReel := time.NewMasterTimeReel(zapLogger, pebbleClockStore, engineConfig, frameProver)
 	inMemoryPeerInfoManager := p2p.NewInMemoryPeerInfoManager(zapLogger)

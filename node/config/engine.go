@@ -118,6 +118,10 @@ type EngineConfig struct {
 	Difficulty uint32 `yaml:"difficulty"`
 	// Whether to allow GOMAXPROCS values above the number of physical cores.
 	AllowExcessiveGOMAXPROCS bool `yaml:"allowExcessiveGOMAXPROCS"`
+	// Hypergraph rebuild range start
+	RebuildStart string `yaml:"rebuildStart"`
+	// Hypergraph rebuild range end
+	RebuildEnd string `yaml:"rebuildEnd"`
 
 	// EXPERIMENTAL: The configuration for frame publishing.
 	FramePublish FramePublishConfig `yaml:"framePublish"`

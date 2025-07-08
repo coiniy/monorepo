@@ -39,6 +39,14 @@ tasks:
       - verenc/generate.sh
       - node/build.sh -o build/arm64_macos/node
 
+  build_sidecar_arm64_macos:
+    desc: Build the Quilibrium sidecar binary for MacOS ARM. Assumes it's ran from the same platform. Outputs to node/build.
+    cmds:
+      - vdf/generate.sh
+      - bls48581/generate.sh
+      - verenc/generate.sh
+      - sidecar/build.sh -o build/arm64_macos/node
+
   build_qclient_arm64_macos:
     desc: Build the QClient node binary for MacOS ARM. Outputs to client/build
     cmds:
@@ -51,6 +59,11 @@ tasks:
     cmds:
       - docker build --platform linux/arm64 -f Dockerfile.source --output node/build/arm64_linux --target=node .
 
+  build_sidecar_arm64_linux:
+    desc: Build the Quilibrium sidecar binary for ARM64 Linux. Outputs to node/build.
+    cmds:
+      - docker build --platform linux/arm64 -f Dockerfile.source --output node/build/arm64_linux --target=sidecar .
+
   build_qclient_arm64_linux:
     desc: Build the QClient node binary for ARM64 Linux. Outputs to client/build.
     cmds:
@@ -61,13 +74,18 @@ tasks:
     cmds:
       - docker build --platform linux/amd64 -f Dockerfile.source --output node/build/amd64_linux --target=node .
 
+  build_sidecar_amd64_linux:
+    desc: Build the Quilibrium sidecar binary for AMD64 Linux. Outputs to node/build.
+    cmds:
+      - docker build --platform linux/amd64 -f Dockerfile.source --output node/build/amd64_linux --target=sidecar .
+
   build_node_amd64_avx512_linux:
     desc: Build the Quilibrium node binary for AMD64 Linux with AVX-512 extensions. Outputs to node/build.
     cmds:
       - docker build --platform linux/amd64 -f Dockerfile.sourceavx512 --output node/build/amd64_avx512_linux --target=node .
 
   build_qclient_amd64_linux:
-    desc: Build the QClient node binary for AMD64 Linux. Outputs to node/build.
+    desc: Build the QClient node binary for AMD64 Linux. Outputs to client/build.
     cmds:
       - docker build --platform linux/amd64 -f Dockerfile.source --output client/build/amd64_linux --target=qclient .
 
@@ -124,3 +142,8 @@ tasks:
     cmds:
       - docker push ${QUILIBRIUM_IMAGE_NAME:-quilibrium}:{{.VERSION}}
       - docker push ${QUILIBRIUM_IMAGE_NAME:-quilibrium}:latest
+
+  test:qclient:
+    desc: Test the Quilibrium docker image.
+    cmds:
+      - client/test/run_tests.sh -d 'ubuntu' -v '24.04'

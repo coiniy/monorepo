@@ -499,7 +499,7 @@ func RebuildPeerSeniority(network uint) (map[string]uint64, error) {
 
 // Creates a genesis state for the intrinsic
 func CreateGenesisState(
-	logger *zap.Logger,
+	parentLogger *zap.Logger,
 	engineConfig *config.EngineConfig,
 	testProverKeys [][]byte,
 	inclusionProver qcrypto.InclusionProver,
@@ -515,14 +515,15 @@ func CreateGenesisState(
 	[][]byte,
 	map[string]uint64,
 ) {
+	logger := parentLogger.With(zap.String("stage", "create-genesis-state"))
 	genesis := config.GetGenesis()
 	if genesis == nil {
-		panic("genesis is nil")
+		logger.Panic("genesis is nil")
 	}
 
 	seed, err := hex.DecodeString(engineConfig.GenesisSeed)
 	if err != nil {
-		panic(err)
+		logger.Panic("failed to decode genesis seed", zap.Error(err))
 	}
 
 	logger.Info("creating genesis frame from message:")
@@ -558,32 +559,32 @@ func CreateGenesisState(
 
 		err = json.Unmarshal(bridgedPeersJsonBinary, &bridged)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to unmarshal bridged peers json", zap.Error(err))
 		}
 
 		err = json.Unmarshal(ceremonyVouchersJsonBinary, &vouchers)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to unmarshal ceremony vouchers json", zap.Error(err))
 		}
 
 		err = json.Unmarshal(firstRetroJsonBinary, &firstRetro)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to unmarshal first retro json", zap.Error(err))
 		}
 
 		err = json.Unmarshal(secondRetroJsonBinary, &secondRetro)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to unmarshal second retro json", zap.Error(err))
 		}
 
 		err = json.Unmarshal(thirdRetroJsonBinary, &thirdRetro)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to unmarshal third retro json", zap.Error(err))
 		}
 
 		err = json.Unmarshal(fourthRetroJsonBinary, &fourthRetro)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to unmarshal fourth retro json", zap.Error(err))
 		}
 
 		bridgedAddrs := map[string]struct{}{}
@@ -593,7 +594,7 @@ func CreateGenesisState(
 		for _, b := range bridged {
 			amt, err := decimal.NewFromString(b.Amount)
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to parse bridged amount", zap.Error(err))
 			}
 			bridgeTotal = bridgeTotal.Add(amt)
 			bridgedAddrs[b.Identifier] = struct{}{}
@@ -610,7 +611,7 @@ func CreateGenesisState(
 			if _, ok := bridgedAddrs[f.PeerId]; !ok {
 				peerIdTotals[f.PeerId], err = decimal.NewFromString(f.Reward)
 				if err != nil {
-					panic(err)
+					logger.Panic("failed to parse first retro amount", zap.Error(err))
 				}
 			}
 
@@ -618,7 +619,7 @@ func CreateGenesisState(
 			max := 157208
 			actual, err := strconv.Atoi(f.Reward)
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to parse first retro amount", zap.Error(err))
 			}
 
 			peerSeniority[addrBytes] = uint64(10 * 6 * 60 * 24 * 92 / (max / actual))
@@ -642,7 +643,7 @@ func CreateGenesisState(
 
 				amount, err := decimal.NewFromString(f.Reward)
 				if err != nil {
-					panic(err)
+					logger.Panic("failed to parse second retro amount", zap.Error(err))
 				}
 
 				if !ok {
@@ -687,7 +688,7 @@ func CreateGenesisState(
 
 			amount, err := decimal.NewFromString(f.Reward)
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to parse third retro amount", zap.Error(err))
 			}
 
 			if !ok {
@@ -713,7 +714,7 @@ func CreateGenesisState(
 
 			amount, err := decimal.NewFromString(f.Reward)
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to parse fourth retro amount", zap.Error(err))
 			}
 
 			if !ok {
@@ -736,7 +737,7 @@ func CreateGenesisState(
 		factor, _ := decimal.NewFromString("8000000000")
 		bridgeAddressHex, err := hex.DecodeString(BridgeAddress)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to decode bridge address", zap.Error(err))
 		}
 
 		totalExecutions := 0
@@ -778,12 +779,12 @@ func CreateGenesisState(
 			}
 			peerBytes, err := base58.Decode(peerId)
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to decode peer id", zap.Error(err))
 			}
 
 			addr, err := poseidon.HashBytes(peerBytes)
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to hash peer id", zap.Error(err))
 			}
 
 			genesisState.Outputs = append(genesisState.Outputs, &protobufs.TokenOutput{
@@ -818,12 +819,12 @@ func CreateGenesisState(
 			}
 			keyBytes, err := hex.DecodeString(voucher[2:])
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to decode voucher", zap.Error(err))
 			}
 
 			addr, err := poseidon.HashBytes(keyBytes)
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to hash voucher", zap.Error(err))
 			}
 
 			genesisState.Outputs = append(genesisState.Outputs, &protobufs.TokenOutput{
@@ -856,12 +857,12 @@ func CreateGenesisState(
 		txn, err := coinStore.NewTransaction(false)
 		for _, output := range genesisState.Outputs {
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to create transaction", zap.Error(err))
 			}
 
 			address, err := GetAddressOfCoin(output.GetCoin(), 0, 0)
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to get address of coin", zap.Error(err))
 			}
 			err = coinStore.PutCoin(
 				txn,
@@ -870,7 +871,7 @@ func CreateGenesisState(
 				output.GetCoin(),
 			)
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to put coin", zap.Error(err))
 			}
 
 			value := []byte{}
@@ -894,23 +895,36 @@ func CreateGenesisState(
 			for _, d := range proofs {
 				compressed = append(compressed, d)
 			}
+			vertTree, commitment, err := hypergraphStore.CommitAndSaveVertexData(
+				txn,
+				append(append([]byte{}, application.TOKEN_ADDRESS...), address...),
+				compressed,
+			)
+			if err != nil {
+				txn.Abort()
+				logger.Panic("failed to commit and save vertex data", zap.Error(err))
+			}
+
 			if err := hg.AddVertex(
+				nil,
 				hypergraph.NewVertex(
 					[32]byte(application.TOKEN_ADDRESS),
 					[32]byte(address),
-					compressed,
+					commitment,
+					vertTree.GetSize(),
 				),
 			); err != nil {
-				panic(err)
+				txn.Abort()
+				logger.Panic("failed to add vertex", zap.Error(err))
 			}
 		}
 		if err := txn.Commit(); err != nil {
-			panic(err)
+			logger.Panic("failed to commit transaction", zap.Error(err))
 		}
 
 		txn, err = clockStore.NewTransaction(false)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to create transaction", zap.Error(err))
 		}
 
 		err = clockStore.PutPeerSeniorityMap(
@@ -919,25 +933,20 @@ func CreateGenesisState(
 			map[string]uint64{},
 		)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to put peer seniority map", zap.Error(err))
 		}
 
 		intrinsicFilter := p2p.GetBloomFilter(application.TOKEN_ADDRESS, 256, 3)
-		err = hypergraphStore.SaveHypergraph(txn, hg)
-		if err != nil {
-			txn.Abort()
-			panic(err)
-		}
 
 		if err = txn.Commit(); err != nil {
-			panic(err)
+			logger.Panic("failed to commit transaction", zap.Error(err))
 		}
 
 		logger.Info("encoded transcript")
 
 		outputBytes, err := proto.Marshal(genesisState)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to marshal genesis state", zap.Error(err))
 		}
 
 		executionOutput := &protobufs.IntrinsicExecutionOutput{
@@ -948,20 +957,20 @@ func CreateGenesisState(
 
 		data, err := proto.Marshal(executionOutput)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to marshal execution output", zap.Error(err))
 		}
 
 		logger.Debug("encoded execution output")
 		digest := sha3.NewShake256()
 		_, err = digest.Write(data)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to write digest", zap.Error(err))
 		}
 
 		expand := make([]byte, 1024)
 		_, err = digest.Read(expand)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to read digest", zap.Error(err))
 		}
 
 		commitment, err := inclusionProver.CommitRaw(
@@ -969,7 +978,7 @@ func CreateGenesisState(
 			16,
 		)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to commit raw", zap.Error(err))
 		}
 
 		logger.Debug("creating kzg proof")
@@ -979,7 +988,7 @@ func CreateGenesisState(
 			16,
 		)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to prove raw", zap.Error(err))
 		}
 
 		logger.Info("finalizing execution proof")
@@ -1006,7 +1015,7 @@ func CreateGenesisState(
 
 		addr, err := poseidon.HashBytes(genesis.Beacon)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to hash beacon", zap.Error(err))
 		}
 
 		factor, _ := new(big.Int).SetString("8000000000", 10)
@@ -1033,12 +1042,12 @@ func CreateGenesisState(
 		txn, err := coinStore.NewTransaction(false)
 		for _, output := range genesisState.Outputs {
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to create transaction", zap.Error(err))
 			}
 
 			address, err := GetAddressOfCoin(output.GetCoin(), 0, 0)
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to get address of coin", zap.Error(err))
 			}
 			err = coinStore.PutCoin(
 				txn,
@@ -1047,11 +1056,11 @@ func CreateGenesisState(
 				output.GetCoin(),
 			)
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to put coin", zap.Error(err))
 			}
 			coinBytes, err := proto.Marshal(output.GetCoin())
 			if err != nil {
-				panic(err)
+				logger.Panic("failed to marshal coin", zap.Error(err))
 			}
 
 			data := []byte{}
@@ -1065,32 +1074,40 @@ func CreateGenesisState(
 			for _, d := range proofs {
 				compressed = append(compressed, d)
 			}
+			vertTree, commitment, err := hypergraphStore.CommitAndSaveVertexData(
+				txn,
+				append(append([]byte{}, application.TOKEN_ADDRESS...), address...),
+				compressed,
+			)
+			if err != nil {
+				txn.Abort()
+				logger.Panic("failed to commit and save vertex data", zap.Error(err))
+			}
+
 			if err := hg.AddVertex(
+				nil,
 				hypergraph.NewVertex(
 					[32]byte(application.TOKEN_ADDRESS),
 					[32]byte(address),
-					compressed,
+					commitment,
+					vertTree.GetSize(),
 				),
 			); err != nil {
-				panic(err)
+				txn.Abort()
+				logger.Panic("failed to add vertex", zap.Error(err))
 			}
 		}
 		intrinsicFilter := p2p.GetBloomFilter(application.TOKEN_ADDRESS, 256, 3)
-		err = hypergraphStore.SaveHypergraph(txn, hg)
-		if err != nil {
-			txn.Abort()
-			panic(err)
-		}
 
 		if err := txn.Commit(); err != nil {
-			panic(err)
+			logger.Panic("failed to commit transaction", zap.Error(err))
 		}
 
 		logger.Info("encoded transcript")
 
 		outputBytes, err := proto.Marshal(genesisState)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to marshal genesis state", zap.Error(err))
 		}
 
 		executionOutput := &protobufs.IntrinsicExecutionOutput{
@@ -1101,20 +1118,20 @@ func CreateGenesisState(
 
 		data, err := proto.Marshal(executionOutput)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to marshal execution output", zap.Error(err))
 		}
 
 		logger.Debug("encoded execution output")
 		digest := sha3.NewShake256()
 		_, err = digest.Write(data)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to write digest", zap.Error(err))
 		}
 
 		expand := make([]byte, 1024)
 		_, err = digest.Read(expand)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to read digest", zap.Error(err))
 		}
 
 		commitment, err := inclusionProver.CommitRaw(
@@ -1122,7 +1139,7 @@ func CreateGenesisState(
 			16,
 		)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to commit raw", zap.Error(err))
 		}
 
 		logger.Debug("creating kzg proof")
@@ -1132,7 +1149,7 @@ func CreateGenesisState(
 			16,
 		)
 		if err != nil {
-			panic(err)
+			logger.Panic("failed to prove raw", zap.Error(err))
 		}
 
 		logger.Info("finalizing execution proof")

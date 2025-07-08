@@ -175,53 +175,54 @@ func NewDataClockConsensusEngine(
 	if logger == nil {
 		panic(errors.New("logger is nil"))
 	}
+	slogger := logger.With(zap.String("stage", "data-clock-consensus"))
 
 	if cfg == nil {
-		panic(errors.New("engine config is nil"))
+		slogger.Panic("engine config is nil")
 	}
 
 	if keyManager == nil {
-		panic(errors.New("key manager is nil"))
+		slogger.Panic("key manager is nil")
 	}
 
 	if clockStore == nil {
-		panic(errors.New("clock store is nil"))
+		slogger.Panic("clock store is nil")
 	}
 
 	if coinStore == nil {
-		panic(errors.New("coin store is nil"))
+		slogger.Panic("coin store is nil")
 	}
 
 	if dataProofStore == nil {
-		panic(errors.New("data proof store is nil"))
+		slogger.Panic("data proof store is nil")
 	}
 
 	if keyStore == nil {
-		panic(errors.New("key store is nil"))
+		slogger.Panic("key store is nil")
 	}
 
 	if pubSub == nil {
-		panic(errors.New("pubsub is nil"))
+		slogger.Panic("pubsub is nil")
 	}
 
 	if frameProver == nil {
-		panic(errors.New("frame prover is nil"))
+		slogger.Panic("frame prover is nil")
 	}
 
 	if inclusionProver == nil {
-		panic(errors.New("inclusion prover is nil"))
+		slogger.Panic("frame inclusion prover is nil")
 	}
 
 	if masterTimeReel == nil {
-		panic(errors.New("master time reel is nil"))
+		slogger.Panic("master time reel is nil")
 	}
 
 	if dataTimeReel == nil {
-		panic(errors.New("data time reel is nil"))
+		slogger.Panic("data time reel is nil")
 	}
 
 	if peerInfoManager == nil {
-		panic(errors.New("peer info manager is nil"))
+		slogger.Panic("peer info manager is nil")
 	}
 
 	difficulty := cfg.Engine.Difficulty
@@ -234,12 +235,12 @@ func NewDataClockConsensusEngine(
 		16,
 	)
 	if err != nil {
-		panic(err)
+		slogger.Panic("error creating clock frame fragment buffer", zap.Error(err))
 	}
 
 	cache, err := lru.New[string, struct{}](25)
 	if err != nil {
-		panic(err)
+		slogger.Panic("error creating lru cache", zap.Error(err))
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -247,7 +248,7 @@ func NewDataClockConsensusEngine(
 		ctx:              ctx,
 		cancel:           cancel,
 		difficulty:       difficulty,
-		logger:           logger,
+		logger:           slogger,
 		state:            consensus.EngineStateStopped,
 		clockStore:       clockStore,
 		coinStore:        coinStore,
@@ -326,14 +327,14 @@ func (e *DataClockConsensusEngine) Start() <-chan error {
 	e.logger.Info("loading last seen state")
 	err := e.dataTimeReel.Start()
 	if err != nil {
-		panic(err)
+		e.logger.Panic("error starting data time reel", zap.Error(err))
 	}
 
 	e.frameProverTries = e.dataTimeReel.GetFrameProverTries()
 
 	err = e.createCommunicationKeys()
 	if err != nil {
-		panic(err)
+		e.logger.Panic("error creating communication keys", zap.Error(err))
 	}
 
 	e.wg.Add(4)
@@ -398,7 +399,7 @@ func (e *DataClockConsensusEngine) Start() <-chan error {
 		var currentBackoff = 0
 		lastHead, err := e.dataTimeReel.Head()
 		if err != nil {
-			panic(err)
+			e.logger.Panic("error getting head", zap.Error(err))
 		}
 		source := rand.New(rand.NewSource(rand.Int63()))
 		for {
@@ -416,7 +417,7 @@ func (e *DataClockConsensusEngine) Start() <-chan error {
 			}
 			currentHead, err := e.dataTimeReel.Head()
 			if err != nil {
-				panic(err)
+				e.logger.Panic("error getting head", zap.Error(err))
 			}
 			if currentHead.FrameNumber == lastHead.FrameNumber {
 				currentBackoff = min(maxBackoff, currentBackoff+1)
@@ -434,12 +435,12 @@ func (e *DataClockConsensusEngine) Start() <-chan error {
 		thresholdBeforeConfirming := 4
 		frame, err := e.dataTimeReel.Head()
 		if err != nil {
-			panic(err)
+			e.logger.Panic("error getting head", zap.Error(err))
 		}
 		for {
 			nextFrame, err := e.dataTimeReel.Head()
 			if err != nil {
-				panic(err)
+				e.logger.Panic("error getting head", zap.Error(err))
 			}
 
 			if frame.FrameNumber-100 >= nextFrame.FrameNumber ||
@@ -681,10 +682,10 @@ func (e *DataClockConsensusEngine) Stop(force bool) <-chan error {
 		FrameNumber: e.GetFrame().FrameNumber,
 	}
 	if err := pause.SignED448(e.pubSub.GetPublicKey(), e.pubSub.SignMessage); err != nil {
-		panic(err)
+		e.logger.Panic("error signing prover pause", zap.Error(err))
 	}
 	if err := pause.Validate(); err != nil {
-		panic(err)
+		e.logger.Panic("error validating prover pause", zap.Error(err))
 	}
 
 	if err := e.publishMessage(e.txFilter, pause.TokenRequest()); err != nil {
@@ -699,7 +700,7 @@ func (e *DataClockConsensusEngine) Stop(force bool) <-chan error {
 			defer wg.Done()
 			frame, err := e.dataTimeReel.Head()
 			if err != nil {
-				panic(err)
+				e.logger.Panic("error getting head", zap.Error(err))
 			}
 
 			err = <-e.UnregisterExecutor(name, frame.FrameNumber, force)

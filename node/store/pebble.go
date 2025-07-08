@@ -5,7 +5,9 @@ import (
 
 	"github.com/cockroachdb/pebble"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 	"source.quilibrium.com/quilibrium/monorepo/node/config"
+	"source.quilibrium.com/quilibrium/monorepo/node/utils"
 )
 
 type PebbleDB struct {
@@ -13,9 +15,16 @@ type PebbleDB struct {
 }
 
 func NewPebbleDB(config *config.DBConfig) *PebbleDB {
-	db, err := pebble.Open(config.Path, &pebble.Options{})
+	opts := &pebble.Options{
+		MemTableSize:          64 << 20,
+		MaxOpenFiles:          1000,
+		L0CompactionThreshold: 8,
+		L0StopWritesThreshold: 32,
+		LBaseMaxBytes:         64 << 20,
+	}
+	db, err := pebble.Open(config.Path, opts)
 	if err != nil {
-		panic(err)
+		utils.GetLogger().Panic("failed to open pebble db", zap.Error(err))
 	}
 
 	return &PebbleDB{db}

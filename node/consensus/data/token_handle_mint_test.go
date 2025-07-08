@@ -147,9 +147,9 @@ func TestHandlePreMidnightMint(t *testing.T) {
 		preMidnightMint:                 map[string]struct{}{},
 	}
 
-	d.dataTimeReel.SetHead(&protobufs.ClockFrame{
-		FrameNumber: 0,
-	})
+	// d.dataTimeReel.SetHead(&protobufs.ClockFrame{
+	// 	FrameNumber: 0,
+	// })
 
 	d.pubSub = pubsub{
 		privkey: bprivKey,
@@ -674,7 +674,7 @@ func TestHandlePreMidnightMint(t *testing.T) {
 			err = app.CoinStore.PutCoin(txn, 1, a, e.Coin)
 			assert.NoError(t, err)
 		case *protobufs.TokenOutput_DeletedCoin:
-			c, err := app.CoinStore.GetCoinByAddress(nil, e.DeletedCoin.Address)
+			_, c, err := app.CoinStore.GetCoinByAddress(nil, e.DeletedCoin.Address)
 			assert.NoError(t, err)
 			err = app.CoinStore.DeleteCoin(txn, e.DeletedCoin.Address, c)
 			assert.NoError(t, err)
