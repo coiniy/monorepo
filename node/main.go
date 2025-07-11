@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"log"
 	"math/big"
 	"net/http"
 	npprof "net/http/pprof"
@@ -141,16 +142,6 @@ var (
 		false,
 		"compacts the database and exits",
 	)
-	strictSyncServer = flag.String(
-		"strict-sync-server",
-		"",
-		"runs only a server to listen for hypersync requests, uses multiaddr format (e.g. /ip4/0.0.0.0/tcp/8339)",
-	)
-	strictSyncClient = flag.String(
-		"strict-sync-client",
-		"",
-		"runs only a client to connect to a server listening for hypersync requests, uses multiaddr format (e.g. /ip4/127.0.0.1/tcp/8339)",
-	)
 )
 
 func signatureCheckDefault() bool {
@@ -160,9 +151,7 @@ func signatureCheckDefault() bool {
 		if err == nil {
 			return def
 		} else {
-			utils.GetLogger().Error(
-				"Invalid environment variable QUILIBRIUM_SIGNATURE_CHECK, must be 'true' or 'false'.",
-				zap.String("envVarValue", envVarValue))
+			fmt.Println("Invalid environment variable QUILIBRIUM_SIGNATURE_CHECK, must be 'true' or 'false'. Got: " + envVarValue)
 		}
 	}
 
@@ -171,43 +160,47 @@ func signatureCheckDefault() bool {
 
 func main() {
 	flag.Parse()
-	logger := utils.GetLogger()
 
 	if *signatureCheck {
-		sLogger := logger.With(zap.String("stage", "signature-check"))
 		if runtime.GOOS == "windows" {
-			sLogger.Info("Signature check not available for windows yet, skipping...")
+			fmt.Println("Signature check not available for windows yet, skipping...")
 		} else {
 			ex, err := os.Executable()
 			if err != nil {
-				sLogger.Panic("Failed to get executable path", zap.Error(err), zap.String("executable", ex))
+				panic(err)
 			}
 
 			b, err := os.ReadFile(ex)
 			if err != nil {
-				sLogger.Panic("Error encountered during signature check – are you running this "+
-					"from source? (use --signature-check=false)",
-					zap.Error(err))
+				fmt.Println(
+					"Error encountered during signature check – are you running this " +
+						"from source? (use --signature-check=false)",
+				)
+				panic(err)
 			}
 
 			checksum := sha3.Sum256(b)
 			digest, err := os.ReadFile(ex + ".dgst")
 			if err != nil {
-				sLogger.Fatal("Digest file not found", zap.Error(err))
+				fmt.Println("Digest file not found")
+				os.Exit(1)
 			}
 
 			parts := strings.Split(string(digest), " ")
 			if len(parts) != 2 {
-				sLogger.Fatal("Invalid digest file format")
+				fmt.Println("Invalid digest file format")
+				os.Exit(1)
 			}
 
 			digestBytes, err := hex.DecodeString(parts[1][:64])
 			if err != nil {
-				sLogger.Fatal("Invalid digest file format", zap.Error(err))
+				fmt.Println("Invalid digest file format")
+				os.Exit(1)
 			}
 
 			if !bytes.Equal(checksum[:], digestBytes) {
-				sLogger.Fatal("Invalid digest for node")
+				fmt.Println("Invalid digest for node")
+				os.Exit(1)
 			}
 
 			count := 0
@@ -221,19 +214,21 @@ func main() {
 
 				pubkey, _ := hex.DecodeString(config.Signatories[i-1])
 				if !ed448.Verify(pubkey, digest, sig, "") {
-					sLogger.Fatal("Failed signature check for signatory", zap.Int("signatory", i))
+					fmt.Printf("Failed signature check for signatory #%d\n", i)
+					os.Exit(1)
 				}
 				count++
 			}
 
 			if count < ((len(config.Signatories)-4)/2)+((len(config.Signatories)-4)%2) {
-				sLogger.Fatal("Quorum on signatures not met")
+				fmt.Printf("Quorum on signatures not met")
+				os.Exit(1)
 			}
 
-			sLogger.Info("Signature check passed")
+			fmt.Println("Signature check passed")
 		}
 	} else {
-		logger.Info("Signature check disabled, skipping...")
+		fmt.Println("Signature check disabled, skipping...")
 	}
 
 	if *memprofile != "" && *core == 0 {
@@ -242,7 +237,7 @@ func main() {
 				time.Sleep(5 * time.Minute)
 				f, err := os.Create(*memprofile)
 				if err != nil {
-					logger.Fatal("Failed to create memory profile file", zap.Error(err))
+					log.Fatal(err)
 				}
 				pprof.WriteHeapProfile(f)
 				f.Close()
@@ -253,7 +248,7 @@ func main() {
 	if *cpuprofile != "" && *core == 0 {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
-			logger.Fatal("Failed to create CPU profile file", zap.Error(err))
+			log.Fatal(err)
 		}
 		defer f.Close()
 		pprof.StartCPUProfile(f)
@@ -268,7 +263,7 @@ func main() {
 			mux.HandleFunc("/debug/pprof/profile", npprof.Profile)
 			mux.HandleFunc("/debug/pprof/symbol", npprof.Symbol)
 			mux.HandleFunc("/debug/pprof/trace", npprof.Trace)
-			logger.Fatal("Failed to start pprof server", zap.Error(http.ListenAndServe(*pprofServer, mux)))
+			log.Fatal(http.ListenAndServe(*pprofServer, mux))
 		}()
 	}
 
@@ -276,14 +271,14 @@ func main() {
 		go func() {
 			mux := http.NewServeMux()
 			mux.Handle("/metrics", promhttp.Handler())
-			logger.Fatal("Failed to start prometheus server", zap.Error(http.ListenAndServe(*prometheusServer, mux)))
+			log.Fatal(http.ListenAndServe(*prometheusServer, mux))
 		}()
 	}
 
 	if *balance {
 		config, err := config.LoadConfig(*configDirectory, "", false)
 		if err != nil {
-			logger.Fatal("Failed to load config", zap.Error(err))
+			panic(err)
 		}
 
 		printBalance(config)
@@ -294,7 +289,7 @@ func main() {
 	if *peerId {
 		config, err := config.LoadConfig(*configDirectory, "", false)
 		if err != nil {
-			logger.Fatal("Failed to load config", zap.Error(err))
+			panic(err)
 		}
 
 		printPeerID(config.P2P)
@@ -304,18 +299,18 @@ func main() {
 	if *importPrivKey != "" {
 		config, err := config.LoadConfig(*configDirectory, *importPrivKey, false)
 		if err != nil {
-			logger.Fatal("Failed to load config", zap.Error(err))
+			panic(err)
 		}
 
 		printPeerID(config.P2P)
-		logger.Info("Import completed, you are ready for the launch.")
+		fmt.Println("Import completed, you are ready for the launch.")
 		return
 	}
 
 	if *nodeInfo {
 		config, err := config.LoadConfig(*configDirectory, "", false)
 		if err != nil {
-			logger.Fatal("Failed to load config", zap.Error(err))
+			panic(err)
 		}
 
 		printNodeInfo(config)
@@ -330,26 +325,27 @@ func main() {
 
 	nodeConfig, err := config.LoadConfig(*configDirectory, "", false)
 	if err != nil {
-		logger.Fatal("Failed to load config", zap.Error(err))
+		panic(err)
 	}
 
 	if *compactDB && *core == 0 {
 		db := store.NewPebbleDB(nodeConfig.DB)
 		if err := db.CompactAll(); err != nil {
-			logger.Fatal("Failed to compact database", zap.Error(err))
+			panic(err)
 		}
 		if err := db.Close(); err != nil {
-			logger.Fatal("Failed to close database", zap.Error(err))
+			panic(err)
 		}
 		return
 	}
 
 	if *network != 0 {
 		if nodeConfig.P2P.BootstrapPeers[0] == config.BootstrapPeers[0] {
-			logger.Fatal(
+			fmt.Println(
 				"Node has specified to run outside of mainnet but is still " +
 					"using default bootstrap list. This will fail. Exiting.",
 			)
+			os.Exit(1)
 		}
 
 		nodeConfig.Engine.GenesisSeed = fmt.Sprintf(
@@ -358,7 +354,7 @@ func main() {
 			nodeConfig.Engine.GenesisSeed,
 		)
 		nodeConfig.P2P.Network = uint8(*network)
-		logger.Warn(
+		fmt.Println(
 			"Node is operating outside of mainnet – be sure you intended to do this.",
 		)
 	}
@@ -373,7 +369,7 @@ func main() {
 	if *dbConsole {
 		console, err := app.NewDBConsole(nodeConfig)
 		if err != nil {
-			logger.Panic("Failed to start database console", zap.Error(err))
+			panic(err)
 		}
 
 		console.Run()
@@ -385,7 +381,7 @@ func main() {
 		signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 		dht, err := app.NewDHTNode(nodeConfig)
 		if err != nil {
-			logger.Error("Failed to start DHT node", zap.Error(err))
+			panic(err)
 		}
 
 		go func() {
@@ -400,7 +396,8 @@ func main() {
 	if len(nodeConfig.Engine.DataWorkerMultiaddrs) == 0 {
 		maxProcs, numCPU := runtime.GOMAXPROCS(0), runtime.NumCPU()
 		if maxProcs > numCPU && !nodeConfig.Engine.AllowExcessiveGOMAXPROCS {
-			logger.Fatal("GOMAXPROCS is set higher than the number of available CPUs.")
+			fmt.Println("GOMAXPROCS is set higher than the number of available CPUs.")
+			os.Exit(1)
 		}
 
 		nodeConfig.Engine.DataWorkerCount = qruntime.WorkerCount(
@@ -412,7 +409,12 @@ func main() {
 		rdebug.SetMemoryLimit(nodeConfig.Engine.DataWorkerMemoryLimit)
 
 		if *parentProcess == 0 && len(nodeConfig.Engine.DataWorkerMultiaddrs) == 0 {
-			logger.Fatal("parent process pid not specified")
+			panic("parent process pid not specified")
+		}
+
+		l, err := zap.NewProduction()
+		if err != nil {
+			panic(err)
 		}
 
 		rpcMultiaddr := fmt.Sprintf(
@@ -426,19 +428,19 @@ func main() {
 
 		srv, err := rpc.NewDataWorkerIPCServer(
 			rpcMultiaddr,
-			logger,
+			l,
 			uint32(*core)-1,
-			qcrypto.NewWesolowskiFrameProver(logger),
+			qcrypto.NewWesolowskiFrameProver(l),
 			nodeConfig,
 			*parentProcess,
 		)
 		if err != nil {
-			logger.Panic("Failed to start data worker server", zap.Error(err))
+			panic(err)
 		}
 
 		err = srv.Start()
 		if err != nil {
-			logger.Panic("Failed to start data worker server", zap.Error(err))
+			panic(err)
 		}
 		return
 	} else {
@@ -449,15 +451,11 @@ func main() {
 		}
 		switch availableOverhead := totalMemory - dataWorkerReservedMemory; {
 		case totalMemory < dataWorkerReservedMemory:
-			logger.Warn("The memory allocated to data workers exceeds the total system memory.",
-				zap.Int64("totalMemory", totalMemory),
-				zap.Int64("dataWorkerReservedMemory", dataWorkerReservedMemory),
-			)
-			logger.Warn("You are at risk of running out of memory during runtime.")
+			fmt.Println("The memory allocated to data workers exceeds the total system memory.")
+			fmt.Println("You are at risk of running out of memory during runtime.")
 		case availableOverhead < 8*1024*1024*1024:
-			logger.Warn("The memory available to the node, unallocated to the data workers, is less than 8GiB.",
-				zap.Int64("availableOverhead", availableOverhead))
-			logger.Warn("You are at risk of running out of memory during runtime.")
+			fmt.Println("The memory available to the node, unallocated to the data workers, is less than 8GiB.")
+			fmt.Println("You are at risk of running out of memory during runtime.")
 		default:
 			if _, explicitGOMEMLIMIT := os.LookupEnv("GOMEMLIMIT"); !explicitGOMEMLIMIT {
 				rdebug.SetMemoryLimit(availableOverhead * 8 / 10)
@@ -468,7 +466,7 @@ func main() {
 		}
 	}
 
-	logger.Info("Loading ceremony state and starting node...")
+	fmt.Println("Loading ceremony state and starting node...")
 
 	if !*integrityCheck {
 		go spawnDataWorkers(nodeConfig)
@@ -495,39 +493,20 @@ func main() {
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 	var node *app.Node
-	if *debug && *strictSyncServer == "" && *strictSyncClient == "" {
+	if *debug {
 		node, err = app.NewDebugNode(nodeConfig, report)
-	} else if *strictSyncServer != "" {
-		logger.Info("Running in strict sync server mode, will not connect to regular p2p network...")
-
-		node, err = app.NewStrictSyncNode(
-			nodeConfig,
-			report,
-			rpc.NewStandaloneHypersyncServer(
-				nodeConfig.DB,
-				*strictSyncServer,
-			),
-		)
-	} else if *strictSyncClient != "" {
-		logger.Info("Running in strict sync client mode, will not connect to regular p2p network...")
-
-		node, err = app.NewStrictSyncNode(
-			nodeConfig,
-			report,
-			rpc.NewStandaloneHypersyncClient(nodeConfig.DB, *strictSyncClient, done),
-		)
 	} else {
 		node, err = app.NewNode(nodeConfig, report)
 	}
 
 	if err != nil {
-		logger.Panic("Failed to start node", zap.Error(err))
+		panic(err)
 	}
 
 	if *integrityCheck {
-		logger.Info("Running integrity check...")
+		fmt.Println("Running integrity check...")
 		node.VerifyProofIntegrity()
-		logger.Info("Integrity check passed!")
+		fmt.Println("Integrity check passed!")
 		return
 	}
 
@@ -536,8 +515,7 @@ func main() {
 	node.Start()
 	defer node.Stop()
 
-	if nodeConfig.ListenGRPCMultiaddr != "" && *strictSyncServer == "" &&
-		*strictSyncClient == "" {
+	if nodeConfig.ListenGRPCMultiaddr != "" {
 		srv, err := rpc.NewRPCServer(
 			nodeConfig.ListenGRPCMultiaddr,
 			nodeConfig.ListenRestMultiaddr,
@@ -551,10 +529,10 @@ func main() {
 			node.GetExecutionEngines(),
 		)
 		if err != nil {
-			logger.Panic("Failed to new RPC server", zap.Error(err))
+			panic(err)
 		}
 		if err := srv.Start(); err != nil {
-			logger.Panic("Failed to start RPC server", zap.Error(err))
+			panic(err)
 		}
 		defer srv.Stop()
 	}
@@ -565,19 +543,20 @@ func main() {
 var dataWorkers []*exec.Cmd
 
 func spawnDataWorkers(nodeConfig *config.Config) {
-	logger := utils.GetLogger().With(zap.String("stage", "spawn-data-worker"))
 	if len(nodeConfig.Engine.DataWorkerMultiaddrs) != 0 {
-		logger.Warn("Data workers configured by multiaddr, be sure these are running...")
+		fmt.Println(
+			"Data workers configured by multiaddr, be sure these are running...",
+		)
 		return
 	}
 
 	process, err := os.Executable()
 	if err != nil {
-		logger.Panic("Failed to get executable path", zap.Error(err))
+		panic(err)
 	}
 
 	dataWorkers = make([]*exec.Cmd, nodeConfig.Engine.DataWorkerCount)
-	logger.Info("Spawning data workers", zap.Int("count", nodeConfig.Engine.DataWorkerCount))
+	fmt.Printf("Spawning %d data workers...\n", nodeConfig.Engine.DataWorkerCount)
 
 	for i := 1; i <= nodeConfig.Engine.DataWorkerCount; i++ {
 		i := i
@@ -593,15 +572,13 @@ func spawnDataWorkers(nodeConfig *config.Config) {
 				cmd.Stderr = os.Stdout
 				err := cmd.Start()
 				if err != nil {
-					logger.Panic("Failed to start data worker",
-						zap.String("cmd", cmd.String()),
-						zap.Error(err))
+					panic(err)
 				}
 
 				dataWorkers[i-1] = cmd
 				cmd.Wait()
 				time.Sleep(25 * time.Millisecond)
-				logger.Info("Data worker stopped, restarting...", zap.Int("worker-number", i))
+				fmt.Printf("Data worker %d stopped, restarting...\n", i)
 			}
 		}()
 	}
@@ -611,9 +588,9 @@ func stopDataWorkers() {
 	for i := 0; i < len(dataWorkers); i++ {
 		err := dataWorkers[i].Process.Signal(os.Kill)
 		if err != nil {
-			utils.GetLogger().Info("unable to kill worker",
-				zap.Int("pid", dataWorkers[i].Process.Pid),
-				zap.Error(err),
+			fmt.Printf(
+				"fatal: unable to kill worker with pid %d, please kill this process!\n",
+				dataWorkers[i].Process.Pid,
 			)
 		}
 	}
@@ -623,7 +600,7 @@ func RunSelfTestIfNeeded(
 	configDir string,
 	nodeConfig *config.Config,
 ) *protobufs.SelfTestReport {
-	logger := utils.GetLogger()
+	logger, _ := zap.NewProduction()
 
 	cores := runtime.GOMAXPROCS(0)
 	if len(nodeConfig.Engine.DataWorkerMultiaddrs) != 0 {
@@ -635,7 +612,7 @@ func RunSelfTestIfNeeded(
 	if d == nil {
 		err := os.Mkdir(filepath.Join(configDir, "store"), 0755)
 		if err != nil {
-			logger.Panic("Failed to create store directory", zap.Error(err))
+			panic(err)
 		}
 	}
 
@@ -654,7 +631,7 @@ func RunSelfTestIfNeeded(
 	}
 	reportBytes, err := proto.Marshal(report)
 	if err != nil {
-		logger.Panic("Failed to marshal self test report", zap.Error(err))
+		panic(err)
 	}
 
 	err = os.WriteFile(
@@ -663,20 +640,19 @@ func RunSelfTestIfNeeded(
 		fs.FileMode(0600),
 	)
 	if err != nil {
-		logger.Panic("Failed to write self test report", zap.Error(err))
+		panic(err)
 	}
 
 	return report
 }
 
 func clearIfTestData(configDir string, nodeConfig *config.Config) {
-	logger := utils.GetLogger().With(zap.String("stage", "clear-test-data"))
 	_, err := os.Stat(filepath.Join(configDir, "RELEASE_VERSION"))
 	if os.IsNotExist(err) {
-		logger.Info("Clearing test data...")
+		fmt.Println("Clearing test data...")
 		err := os.RemoveAll(nodeConfig.DB.Path)
 		if err != nil {
-			logger.Panic("Failed to remove test data", zap.Error(err))
+			panic(err)
 		}
 
 		versionFile, err := os.OpenFile(
@@ -685,30 +661,30 @@ func clearIfTestData(configDir string, nodeConfig *config.Config) {
 			fs.FileMode(0600),
 		)
 		if err != nil {
-			logger.Panic("Failed to open RELEASE_VERSION file", zap.Error(err))
+			panic(err)
 		}
 
 		_, err = versionFile.Write([]byte{0x01, 0x00, 0x00})
 		if err != nil {
-			logger.Panic("Failed to write RELEASE_VERSION file", zap.Error(err))
+			panic(err)
 		}
 
 		err = versionFile.Close()
 		if err != nil {
-			logger.Panic("Failed to close RELEASE_VERSION file", zap.Error(err))
+			panic(err)
 		}
 	}
 }
 
 func printBalance(config *config.Config) {
-	logger := utils.GetLogger()
 	if config.ListenGRPCMultiaddr == "" {
-		logger.Fatal("gRPC Not Enabled, Please Configure")
+		_, _ = fmt.Fprintf(os.Stderr, "gRPC Not Enabled, Please Configure\n")
+		os.Exit(1)
 	}
 
 	conn, err := app.ConnectToNode(config)
 	if err != nil {
-		logger.Panic("Connect to node failed", zap.Error(err))
+		panic(err)
 	}
 	defer conn.Close()
 
@@ -716,7 +692,7 @@ func printBalance(config *config.Config) {
 
 	balance, err := app.FetchTokenBalance(client)
 	if err != nil {
-		logger.Panic("Failed to fetch token balance", zap.Error(err))
+		panic(err)
 	}
 
 	conversionFactor, _ := new(big.Int).SetString("1DCD65000", 16)
@@ -726,23 +702,20 @@ func printBalance(config *config.Config) {
 }
 
 func getPeerID(p2pConfig *config.P2PConfig) peer.ID {
-	logger := utils.GetLogger()
 	peerPrivKey, err := hex.DecodeString(p2pConfig.PeerPrivKey)
 	if err != nil {
-		logger.Panic("Error to decode peer private key",
-			zap.Error(errors.Wrap(err, "error unmarshaling peerkey")))
+		panic(errors.Wrap(err, "error unmarshaling peerkey"))
 	}
 
 	privKey, err := crypto.UnmarshalEd448PrivateKey(peerPrivKey)
 	if err != nil {
-		logger.Panic("Error to unmarshal ed448 private key",
-			zap.Error(errors.Wrap(err, "error unmarshaling peerkey")))
+		panic(errors.Wrap(err, "error unmarshaling peerkey"))
 	}
 
 	pub := privKey.GetPublic()
 	id, err := peer.IDFromPublicKey(pub)
 	if err != nil {
-		logger.Panic("Error to get peer id", zap.Error(err))
+		panic(errors.Wrap(err, "error getting peer id"))
 	}
 
 	return id
@@ -755,16 +728,17 @@ func printPeerID(p2pConfig *config.P2PConfig) {
 }
 
 func printNodeInfo(cfg *config.Config) {
-	logger := utils.GetLogger()
 	if cfg.ListenGRPCMultiaddr == "" {
-		logger.Fatal("gRPC Not Enabled, Please Configure")
+		_, _ = fmt.Fprintf(os.Stderr, "gRPC Not Enabled, Please Configure\n")
+		os.Exit(1)
 	}
 
 	printPeerID(cfg.P2P)
 
 	conn, err := app.ConnectToNode(cfg)
 	if err != nil {
-		logger.Fatal("Could not connect to node. If it is still booting, please wait.", zap.Error(err))
+		fmt.Println("Could not connect to node. If it is still booting, please wait.")
+		os.Exit(1)
 	}
 	defer conn.Close()
 
@@ -772,7 +746,7 @@ func printNodeInfo(cfg *config.Config) {
 
 	nodeInfo, err := app.FetchNodeInfo(client)
 	if err != nil {
-		logger.Panic("Failed to fetch node info", zap.Error(err))
+		panic(err)
 	}
 
 	fmt.Println("Version: " + config.FormatVersion(nodeInfo.Version))

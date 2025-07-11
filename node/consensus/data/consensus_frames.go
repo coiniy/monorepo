@@ -11,7 +11,6 @@ import (
 	"source.quilibrium.com/quilibrium/monorepo/node/consensus/data/internal"
 	"source.quilibrium.com/quilibrium/monorepo/node/internal/frametime"
 	"source.quilibrium.com/quilibrium/monorepo/node/tries"
-	"source.quilibrium.com/quilibrium/monorepo/node/utils"
 
 	"github.com/iden3/go-iden3-crypto/poseidon"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -456,7 +455,6 @@ func (e *DataClockConsensusEngine) syncWithPeer(
 func (e *DataClockConsensusEngine) initiateProvers(
 	latestFrame *protobufs.ClockFrame,
 ) {
-	logger := utils.GetLogger()
 	if latestFrame.Timestamp > time.Now().UnixMilli()-60000 {
 		if !e.IsInProverTrie(e.pubSub.GetPeerID()) {
 			e.logger.Info("announcing prover join")
@@ -472,7 +470,7 @@ func (e *DataClockConsensusEngine) initiateProvers(
 
 			h, err := poseidon.HashBytes(e.pubSub.GetPeerID())
 			if err != nil {
-				logger.Panic("could not hash peer id", zap.Error(err))
+				panic(err)
 			}
 			peerProvingKeyAddress := h.FillBytes(make([]byte, 32))
 

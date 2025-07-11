@@ -53,7 +53,7 @@ func (e *MasterClockConsensusEngine) handleClockFrameData(
 
 	head, err := e.masterTimeReel.Head()
 	if err != nil {
-		e.logger.Panic("failed to get head", zap.Error(err))
+		panic(err)
 	}
 
 	if frame.FrameNumber < head.FrameNumber {

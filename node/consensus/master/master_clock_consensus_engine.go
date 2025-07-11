@@ -88,40 +88,38 @@ func NewMasterClockConsensusEngine(
 		panic(errors.New("logger is nil"))
 	}
 
-	slogger := logger.With(zap.String("stage", "master-clock-consensus"))
-
 	if engineConfig == nil {
-		slogger.Panic("engine config is nil")
+		panic(errors.New("engine config is nil"))
 	}
 
 	if keyManager == nil {
-		slogger.Panic("key manager is nil")
+		panic(errors.New("key manager is nil"))
 	}
 
 	if pubSub == nil {
-		slogger.Panic("pubsub is nil")
+		panic(errors.New("pubsub is nil"))
 	}
 
 	if dataProver == nil {
-		slogger.Panic("data prover is nil")
+		panic(errors.New("data prover is nil"))
 	}
 
 	if frameProver == nil {
-		slogger.Panic("frame prover is nil")
+		panic(errors.New("frame prover is nil"))
 	}
 
 	if masterTimeReel == nil {
-		slogger.Panic("master time reel is nil")
+		panic(errors.New("master time reel is nil"))
 	}
 
 	seed, err := hex.DecodeString(engineConfig.GenesisSeed)
 	if err != nil {
-		slogger.Panic("genesis seed is nil", zap.Error(err))
+		panic(errors.New("genesis seed is nil"))
 	}
 
 	e := &MasterClockConsensusEngine{
 		difficulty:           MASTER_CLOCK_RATE,
-		logger:               slogger,
+		logger:               logger,
 		state:                consensus.EngineStateStopped,
 		keyManager:           keyManager,
 		pubSub:               pubSub,
@@ -146,16 +144,16 @@ func NewMasterClockConsensusEngine(
 	if e.filter, err = hex.DecodeString(
 		"0000000000000000000000000000000000000000000000000000000000000000",
 	); err != nil {
-		slogger.Panic("could not decode filter", zap.Error(err))
+		panic(errors.Wrap(err, "could not parse filter value"))
 	}
 
 	e.getProvingKey(engineConfig)
 
 	if err := e.createCommunicationKeys(); err != nil {
-		slogger.Panic("could not create communication keys", zap.Error(err))
+		panic(err)
 	}
 
-	slogger.Info("constructing consensus engine")
+	logger.Info("constructing consensus engine")
 
 	return e
 }
@@ -172,19 +170,19 @@ func (e *MasterClockConsensusEngine) Start() <-chan error {
 
 	err := e.masterTimeReel.Start()
 	if err != nil {
-		e.logger.Panic("could not start master time reel", zap.Error(err))
+		panic(err)
 	}
 
 	beaconPubKey, err := pcrypto.UnmarshalEd448PublicKey(
 		config.GetGenesis().Beacon,
 	)
 	if err != nil {
-		e.logger.Panic("could not unmarshal beacon public key", zap.Error(err))
+		panic(err)
 	}
 
 	e.beacon, err = peer.IDFromPublicKey(beaconPubKey)
 	if err != nil {
-		e.logger.Panic("could not get beacon peer id", zap.Error(err))
+		panic(err)
 	}
 
 	go func() {
@@ -193,7 +191,7 @@ func (e *MasterClockConsensusEngine) Start() <-chan error {
 			case newFrame := <-e.frameValidationCh:
 				head, err := e.masterTimeReel.Head()
 				if err != nil {
-					e.logger.Panic("failed to get head", zap.Error(err))
+					panic(err)
 				}
 
 				if head.FrameNumber > newFrame.FrameNumber ||
@@ -239,7 +237,7 @@ func (e *MasterClockConsensusEngine) Start() <-chan error {
 		for e.state < consensus.EngineStateStopping {
 			frame, err := e.masterTimeReel.Head()
 			if err != nil {
-				e.logger.Panic("failed to get head", zap.Error(err))
+				panic(err)
 			}
 
 			if frame, err = e.prove(frame); err != nil {
@@ -342,7 +340,7 @@ func (e *MasterClockConsensusEngine) GetDifficulty() uint32 {
 func (e *MasterClockConsensusEngine) GetFrame() *protobufs.ClockFrame {
 	frame, err := e.masterTimeReel.Head()
 	if err != nil {
-		e.logger.Panic("failed to get head", zap.Error(err))
+		panic(err)
 	}
 
 	return frame
@@ -400,19 +398,22 @@ func (e *MasterClockConsensusEngine) getProvingKey(
 	}
 
 	if err != nil {
-		e.logger.Panic("could not get proving key", zap.Error(err))
+		e.logger.Error("could not get proving key", zap.Error(err))
+		panic(err)
 	}
 
 	rawKey, err := e.keyManager.GetRawKey(engineConfig.ProvingKeyId)
 	if err != nil {
-		e.logger.Panic("could not get proving key type", zap.Error(err))
+		e.logger.Error("could not get proving key type", zap.Error(err))
+		panic(err)
 	}
 
 	provingKeyType := rawKey.Type
 
 	h, err := poseidon.HashBytes(rawKey.PublicKey)
 	if err != nil {
-		e.logger.Panic("could not hash proving key", zap.Error(err))
+		e.logger.Error("could not hash proving key", zap.Error(err))
+		panic(err)
 	}
 
 	provingKeyAddress := h.Bytes()

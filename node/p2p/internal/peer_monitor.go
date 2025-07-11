@@ -59,11 +59,11 @@ func (pm *peerMonitor) run(ctx context.Context, logger *zap.Logger) {
 			logger.Debug("pinging connected peers", zap.Int("peer_count", len(peers)))
 			wg := &sync.WaitGroup{}
 			for _, id := range peers {
-				slogger := logger.With(zap.String("peer_id", id.String()))
+				logger := logger.With(zap.String("peer_id", id.String()))
 				for _, conn := range pm.h.Network().ConnsToPeer(id) {
-					sslogger := slogger.With(zap.String("connection_id", conn.ID()))
+					logger := logger.With(zap.String("connection_id", conn.ID()))
 					wg.Add(1)
-					go pm.ping(ctx, sslogger, wg, conn)
+					go pm.ping(ctx, logger, wg, conn)
 				}
 			}
 			wg.Wait()

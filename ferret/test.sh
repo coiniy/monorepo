@@ -11,7 +11,7 @@ BINARIES_DIR="$ROOT_DIR/target/release"
 
 # Link the native FERRET and execute tests
 pushd "$NODE_DIR" > /dev/null
-	CGO_LDFLAGS="-L$BINARIES_DIR -L/usr/local/lib/ -L/opt/homebrew/Cellar/openssl@3/3.4.1/lib -lstdc++ -lferret -ldl -lm -lcrypto -lssl" \
+	CGO_LDFLAGS="-L$BINARIES_DIR -L/usr/local/lib/ -L/opt/homebrew/Cellar/openssl@3/3.5.0/lib -lstdc++ -lferret -ldl -lm -lcrypto -lssl" \
 	CGO_ENABLED=1 \
 	GOEXPERIMENT=arenas \
   go test "$@"

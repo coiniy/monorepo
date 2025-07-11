@@ -2,9 +2,7 @@ package application_test
 
 import (
 	crand "crypto/rand"
-	"crypto/sha512"
 	"fmt"
-	"math/big"
 	"math/rand"
 	"testing"
 	"time"
@@ -25,22 +23,13 @@ func TestConvergence(t *testing.T) {
 	numOperations := 100000
 	enc := crypto.NewMPCitHVerifiableEncryptor(1)
 	pub, _, _ := ed448.GenerateKey(crand.Reader)
-	data := enc.Encrypt(make([]byte, 20), pub)
-	verenc := data[0].Compress()
+	enc.Encrypt(make([]byte, 20), pub)
 	vertices := make([]application.Vertex, numOperations)
-	dataTree := &crypto.VectorCommitmentTree{}
-	for _, d := range []application.Encrypted{verenc} {
-		dataBytes := d.ToBytes()
-		id := sha512.Sum512(dataBytes)
-		dataTree.Insert(id[:], dataBytes, d.GetStatement(), big.NewInt(int64(len(data)*54)))
-	}
-	dataTree.Commit(false)
 	for i := 0; i < numOperations; i++ {
 		vertices[i] = application.NewVertex(
 			[32]byte{byte((i >> 8) % 256), byte((i % 256))},
 			[32]byte{byte((i >> 8) / 256), byte(i / 256)},
-			dataTree.Commit(false),
-			dataTree.GetSize(),
+			[]application.Encrypted{},
 		)
 	}
 
@@ -79,7 +68,7 @@ func TestConvergence(t *testing.T) {
 
 	crdts := make([]*application.Hypergraph, numParties)
 	for i := 0; i < numParties; i++ {
-		crdts[i] = application.NewHypergraph(nil)
+		crdts[i] = application.NewHypergraph()
 	}
 
 	for i := 0; i < numParties; i++ {
@@ -90,27 +79,27 @@ func TestConvergence(t *testing.T) {
 		for _, op := range operations1 {
 			switch op.Type {
 			case "AddVertex":
-				crdts[i].AddVertex(nil, op.Vertex)
+				crdts[i].AddVertex(op.Vertex)
 			case "RemoveVertex":
-				crdts[i].RemoveVertex(nil, op.Vertex)
+				crdts[i].RemoveVertex(op.Vertex)
 			case "AddHyperedge":
-				crdts[i].AddHyperedge(nil, op.Hyperedge)
+				crdts[i].AddHyperedge(op.Hyperedge)
 			case "RemoveHyperedge":
-				crdts[i].RemoveHyperedge(nil, op.Hyperedge)
+				crdts[i].RemoveHyperedge(op.Hyperedge)
 			}
 		}
 		for _, op := range operations2 {
 			switch op.Type {
 			case "AddVertex":
-				crdts[i].AddVertex(nil, op.Vertex)
+				crdts[i].AddVertex(op.Vertex)
 			case "RemoveVertex":
-				crdts[i].RemoveVertex(nil, op.Vertex)
+				crdts[i].RemoveVertex(op.Vertex)
 			case "AddHyperedge":
 				fmt.Println("add", i, op)
-				crdts[i].AddHyperedge(nil, op.Hyperedge)
+				crdts[i].AddHyperedge(op.Hyperedge)
 			case "RemoveHyperedge":
 				fmt.Println("remove", i, op)
-				crdts[i].RemoveHyperedge(nil, op.Hyperedge)
+				crdts[i].RemoveHyperedge(op.Hyperedge)
 			}
 		}
 	}

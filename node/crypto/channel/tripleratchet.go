@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"sort"
 
 	"github.com/pkg/errors"
@@ -16,7 +17,6 @@ import (
 	"source.quilibrium.com/quilibrium/monorepo/nekryptology/pkg/core/curves"
 	"source.quilibrium.com/quilibrium/monorepo/node/keys"
 	"source.quilibrium.com/quilibrium/monorepo/node/protobufs"
-	"source.quilibrium.com/quilibrium/monorepo/node/utils"
 )
 
 const TRIPLE_RATCHET_PROTOCOL_VERSION = 1
@@ -651,7 +651,7 @@ func (r *TripleRatchetParticipant) decryptHeader(
 		); err != nil {
 			return nil, false, errors.Wrap(err, "could not decrypt header")
 		}
-		utils.GetLogger().Info("should ratchet")
+		fmt.Println("should ratchet")
 		return header, true, nil
 	}
 

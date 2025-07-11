@@ -40,29 +40,28 @@ func NewMasterTimeReel(
 	if logger == nil {
 		panic("logger is nil")
 	}
-	slogger := logger.With(zap.String("stage", "master-time-reel"))
 
 	if clockStore == nil {
-		slogger.Panic("clock store is nil")
+		panic("clock store is nil")
 	}
 
 	if engineConfig == nil {
-		slogger.Panic("engine config is nil")
+		panic("engine config is nil")
 	}
 
 	if frameProver == nil {
-		slogger.Panic("frame prover is nil")
+		panic("frame prover is nil")
 	}
 
 	filter, err := hex.DecodeString(
 		"0000000000000000000000000000000000000000000000000000000000000000",
 	)
 	if err != nil {
-		slogger.Panic("failed to decode filter", zap.Error(err))
+		panic(err)
 	}
 
 	return &MasterTimeReel{
-		logger:       slogger,
+		logger:       logger,
 		filter:       filter,
 		engineConfig: engineConfig,
 		clockStore:   clockStore,
@@ -80,13 +79,13 @@ func (m *MasterTimeReel) Start() error {
 	m.logger.Debug("starting master time reel")
 	frame, err := m.clockStore.GetLatestMasterClockFrame(m.filter)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		m.logger.Panic("failed to get latest master clock frame", zap.Error(err))
+		panic(err)
 	}
 
 	m.logger.Debug("fetching genesis frame")
 	genesis, err := m.clockStore.GetMasterClockFrame(m.filter, 0)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		m.logger.Panic("failed to get genesis frame", zap.Error(err))
+		panic(err)
 	}
 
 	rebuildGenesisFrame := false
@@ -95,7 +94,7 @@ func (m *MasterTimeReel) Start() error {
 
 		err = m.clockStore.ResetMasterClockFrames(m.filter)
 		if err != nil {
-			m.logger.Panic("failed to reset master clock frames", zap.Error(err))
+			panic(err)
 		}
 
 		rebuildGenesisFrame = true
@@ -149,7 +148,7 @@ func (m *MasterTimeReel) Stop() {
 func (m *MasterTimeReel) createGenesisFrame() *protobufs.ClockFrame {
 	seed, err := hex.DecodeString(m.engineConfig.GenesisSeed)
 	if err != nil {
-		m.logger.Panic("failed to decode genesis seed, genesis seed is nil", zap.Error(err))
+		panic(errors.New("genesis seed is nil"))
 	}
 
 	difficulty := m.engineConfig.Difficulty
@@ -163,20 +162,20 @@ func (m *MasterTimeReel) createGenesisFrame() *protobufs.ClockFrame {
 		difficulty,
 	)
 	if err != nil {
-		m.logger.Panic("failed to create genesis frame", zap.Error(err))
+		panic(err)
 	}
 
 	txn, err := m.clockStore.NewTransaction(false)
 	if err != nil {
-		m.logger.Panic("failed to create transaction", zap.Error(err))
+		panic(err)
 	}
 
 	if err = m.clockStore.PutMasterClockFrame(frame, txn); err != nil {
-		m.logger.Panic("failed to put genesis frame", zap.Error(err))
+		panic(err)
 	}
 
 	if err = txn.Commit(); err != nil {
-		m.logger.Panic("failed to commit transaction", zap.Error(err))
+		panic(err)
 	}
 
 	return frame
@@ -196,7 +195,7 @@ func (m *MasterTimeReel) runLoop() {
 					parent := new(big.Int).SetBytes(frame.ParentSelector)
 					selector, err := m.head.GetSelector()
 					if err != nil {
-						m.logger.Panic("failed to get selector", zap.Error(err))
+						panic(err)
 					}
 
 					// master frames cannot fork, this is invalid
@@ -216,15 +215,15 @@ func (m *MasterTimeReel) runLoop() {
 
 					txn, err := m.clockStore.NewTransaction(false)
 					if err != nil {
-						m.logger.Panic("failed to create transaction", zap.Error(err))
+						panic(err)
 					}
 
 					if err := m.clockStore.PutMasterClockFrame(frame, txn); err != nil {
-						m.logger.Panic("failed to put frame", zap.Error(err))
+						panic(err)
 					}
 
 					if err = txn.Commit(); err != nil {
-						m.logger.Panic("failed to commit transaction", zap.Error(err))
+						panic(err)
 					}
 
 					m.head = frame
@@ -265,7 +264,7 @@ func (m *MasterTimeReel) processPending() {
 			parent := new(big.Int).SetBytes(frame.ParentSelector)
 			selector, err := m.head.GetSelector()
 			if err != nil {
-				m.logger.Panic("failed to get selector", zap.Error(err))
+				panic(err)
 			}
 
 			// master frames cannot fork, this is invalid
@@ -285,15 +284,15 @@ func (m *MasterTimeReel) processPending() {
 
 			txn, err := m.clockStore.NewTransaction(false)
 			if err != nil {
-				m.logger.Panic("failed to create transaction", zap.Error(err))
+				panic(err)
 			}
 
 			if err := m.clockStore.PutMasterClockFrame(frame, txn); err != nil {
-				m.logger.Panic("failed to put frame", zap.Error(err))
+				panic(err)
 			}
 
 			if err = txn.Commit(); err != nil {
-				m.logger.Panic("failed to commit transaction", zap.Error(err))
+				panic(err)
 			}
 
 			m.head = frame

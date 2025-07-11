@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
 	"source.quilibrium.com/quilibrium/monorepo/node/consensus"
 	"source.quilibrium.com/quilibrium/monorepo/node/p2p"
 	"source.quilibrium.com/quilibrium/monorepo/node/protobufs"
@@ -45,7 +44,7 @@ func (e *MasterClockConsensusEngine) GetMostAheadPeers() (
 ) {
 	frame, err := e.masterTimeReel.Head()
 	if err != nil {
-		e.logger.Panic("failed to get head", zap.Error(err))
+		panic(err)
 	}
 
 	// Needs to be enough to make the sync worthwhile:
@@ -75,7 +74,7 @@ func (e *MasterClockConsensusEngine) collect(
 ) (*protobufs.ClockFrame, error) {
 	latest, err := e.masterTimeReel.Head()
 	if err != nil {
-		e.logger.Panic("failed to get head", zap.Error(err))
+		panic(err)
 	}
 
 	return latest, nil

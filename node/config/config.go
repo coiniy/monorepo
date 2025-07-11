@@ -18,10 +18,8 @@ import (
 	"github.com/cloudflare/circl/sign/ed448"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
 	"golang.org/x/crypto/sha3"
 	"gopkg.in/yaml.v2"
-	"source.quilibrium.com/quilibrium/monorepo/node/utils"
 )
 
 type GRPCMessageLimitsConfig struct {
@@ -90,6 +88,7 @@ var BootstrapPeers = []string{
 	"/dns/quidditch.quilibrium.com/udp/8336/quic-v1/p2p/QmbZEGuinaCndj4XLb6fteZmjmP3C1Tsgijmc5BGuUk8Ma",
 	"/dns/quagmire.quilibrium.com/udp/8336/quic-v1/p2p/QmaQ9KAaKtqXhYSQ5ARQNnn8B8474cWGvvD6PgJ4gAtMrx",
 	"/ip4/204.186.74.46/udp/8316/quic-v1/p2p/QmeqBjm3iX7sdTieyto1gys5ruQrQNPKfaTGcVQQWJPYDV",
+	"/ip4/185.143.102.84/udp/8336/quic-v1/p2p/Qmce68gLLq9eMdwCcmd1ptfoC2nVoe861LF1cjdVHC2DwK",
 	"/ip4/65.109.17.13/udp/8336/quic-v1/p2p/Qmc35n99eojSvW3PkbfBczJoSX92WmnnKh3Fg114ok3oo4",
 	"/ip4/65.108.194.84/udp/8336/quic-v1/p2p/QmP8C7g9ZRiWzhqN2AgFu5onS6HwHzR6Vv1TCHxAhnCSnq",
 	"/ip4/15.204.100.222/udp/8336/quic-v1/p2p/Qmef3Z3RvGg49ZpDPcf2shWtJNgPJNpXrowjUcfz23YQ3V",
@@ -228,10 +227,9 @@ func DownloadAndVerifyGenesis(network uint) (*SignedGenesisUnlock, error) {
 		return unlock, nil
 	}
 
-	logger := utils.GetLogger().With(zap.String("stage", "download-and-verify-genesis"))
 	resp, err := http.Get("https://releases.quilibrium.com/genesisunlock")
 	if err != nil || resp.StatusCode != 200 {
-		logger.Warn("Stasis lock not yet released.")
+		fmt.Println("Stasis lock not yet released.")
 		return nil, errors.New("stasis lock not yet released")
 	}
 	defer resp.Body.Close()
@@ -276,14 +274,14 @@ func DownloadAndVerifyGenesis(network uint) (*SignedGenesisUnlock, error) {
 
 		opensslMsg := "SHA3-256(genesis)= " + hex.EncodeToString(digest[:])
 		if !ed448.Verify(pubkey, append([]byte(opensslMsg), 0x0a), sig, "") {
-			logger.Warn("Failed signature check for signatory", zap.Int("signatory", i))
+			fmt.Printf("Failed signature check for signatory #%d\n", i)
 			return nil, errors.New("failed signature check")
 		}
 		count++
 	}
 
 	if count < ((len(Signatories)-4)/2)+((len(Signatories)-4)%2) {
-		logger.Warn("Quorum on signatures not met")
+		fmt.Printf("Quorum on signatures not met")
 		return nil, errors.New("quorum on signatures not met")
 	}
 
@@ -301,20 +299,19 @@ func LoadConfig(configPath string, proverKey string, skipGenesisCheck bool) (
 	*Config,
 	error,
 ) {
-	logger := utils.GetLogger().With(zap.String("stage", "load-config"))
 	info, err := os.Stat(configPath)
 	if os.IsNotExist(err) {
-		logger.Info("Creating config directory", zap.String("path", configPath))
+		fmt.Println("Creating config directory " + configPath)
 		if err = os.Mkdir(configPath, fs.FileMode(0700)); err != nil {
-			logger.Panic("Failed to create config directory", zap.Error(err))
+			panic(err)
 		}
 	} else {
 		if err != nil {
-			logger.Panic("Failed to stat config directory", zap.Error(err))
+			panic(err)
 		}
 
 		if !info.IsDir() {
-			logger.Panic("Config path is not a directory", zap.String("path", configPath))
+			panic(configPath + " is not a directory")
 		}
 	}
 
@@ -363,24 +360,24 @@ func LoadConfig(configPath string, proverKey string, skipGenesisCheck bool) (
 	}
 
 	if saveDefaults {
-		logger.Info("Generating default config...")
-		logger.Info("Generating random host key...")
+		fmt.Println("Generating default config...")
+		fmt.Println("Generating random host key...")
 		privkey, _, err := crypto.GenerateEd448Key(rand.Reader)
 		if err != nil {
-			logger.Panic("Failed to generate host key", zap.Error(err))
+			panic(err)
 		}
 
 		hostKey, err := privkey.Raw()
 		if err != nil {
-			logger.Panic("Failed to get raw host key", zap.Error(err))
+			panic(err)
 		}
 
 		config.P2P.PeerPrivKey = hex.EncodeToString(hostKey)
 
-		logger.Info("Generating keystore key...")
+		fmt.Println("Generating keystore key...")
 		keystoreKey := make([]byte, 32)
 		if _, err := rand.Read(keystoreKey); err != nil {
-			logger.Panic("Failed to generate keystore key", zap.Error(err))
+			panic(err)
 		}
 
 		config.Key.KeyStoreFile.EncryptionKey = hex.EncodeToString(keystoreKey)
@@ -394,9 +391,9 @@ func LoadConfig(configPath string, proverKey string, skipGenesisCheck bool) (
 			config.Engine.StatsMultiaddr = multiAddr
 		}
 
-		logger.Info("Saving config to", zap.String("path", configPath))
+		fmt.Println("Saving config...")
 		if err = SaveConfig(configPath, config); err != nil {
-			logger.Panic("Failed to save config", zap.Error(err))
+			panic(err)
 		}
 
 		keyfile, err := os.OpenFile(
@@ -405,13 +402,13 @@ func LoadConfig(configPath string, proverKey string, skipGenesisCheck bool) (
 			fs.FileMode(0600),
 		)
 		if err != nil {
-			logger.Panic("Failed to open key file", zap.Error(err))
+			panic(err)
 		}
 
 		if proverKey != "" {
 			provingKey, err := hex.DecodeString(proverKey)
 			if err != nil {
-				logger.Panic("Failed to decode proving key", zap.Error(err))
+				panic(err)
 			}
 
 			iv := [12]byte{}
@@ -444,7 +441,7 @@ func LoadConfig(configPath string, proverKey string, skipGenesisCheck bool) (
 		if file, err = os.Open(
 			filepath.Join(configPath, "config.yml"),
 		); err != nil {
-			logger.Panic("Failed to open config file", zap.Error(err))
+			panic(err)
 		}
 	}
 

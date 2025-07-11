@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
 	"source.quilibrium.com/quilibrium/monorepo/node/config"
 	"source.quilibrium.com/quilibrium/monorepo/node/store"
 )
@@ -238,7 +237,7 @@ func (e *DataClockConsensusEngine) applySnapshot(
 		false,
 	)
 	if err != nil {
-		e.logger.Error("snapshot not found", zap.Error(err), zap.Uint64("frame", max.FrameNumber+1))
+		fmt.Println("not found", max.FrameNumber+1)
 		temporaryStore.Close()
 		return errors.Wrap(
 			err,

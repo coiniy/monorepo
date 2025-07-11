@@ -47,7 +47,6 @@ import (
 	"source.quilibrium.com/quilibrium/monorepo/node/internal/observability"
 	"source.quilibrium.com/quilibrium/monorepo/node/p2p/internal"
 	"source.quilibrium.com/quilibrium/monorepo/node/protobufs"
-	"source.quilibrium.com/quilibrium/monorepo/node/utils"
 )
 
 const (
@@ -89,21 +88,20 @@ var BITMASK_ALL = []byte{
 var ANNOUNCE_PREFIX = "quilibrium-2.0.2-dusk-"
 
 func getPeerID(p2pConfig *config.P2PConfig) peer.ID {
-	logger := utils.GetLogger().With(zap.String("stage", "get-peer-id"))
 	peerPrivKey, err := hex.DecodeString(p2pConfig.PeerPrivKey)
 	if err != nil {
-		logger.Panic("error unmarshaling peerkey", zap.Error(err))
+		panic(errors.Wrap(err, "error unmarshaling peerkey"))
 	}
 
 	privKey, err := crypto.UnmarshalEd448PrivateKey(peerPrivKey)
 	if err != nil {
-		logger.Panic("error unmarshaling peerkey", zap.Error(err))
+		panic(errors.Wrap(err, "error unmarshaling peerkey"))
 	}
 
 	pub := privKey.GetPublic()
 	id, err := peer.IDFromPublicKey(pub)
 	if err != nil {
-		logger.Panic("error getting peer id", zap.Error(err))
+		panic(errors.Wrap(err, "error getting peer id"))
 	}
 
 	return id
@@ -123,7 +121,7 @@ func NewBlossomSubStreamer(
 
 	peerinfo, err := peer.AddrInfoFromString("/ip4/185.209.178.191/udp/8336/quic-v1/p2p/QmcKQjpQmLpbDsiif2MuakhHFyxWvqYauPsJDaXnLav7PJ")
 	if err != nil {
-		logger.Panic("error getting peer info", zap.Error(err))
+		panic(err)
 	}
 
 	bootstrappers = append(bootstrappers, *peerinfo)
@@ -132,12 +130,12 @@ func NewBlossomSubStreamer(
 	if p2pConfig.PeerPrivKey != "" {
 		peerPrivKey, err := hex.DecodeString(p2pConfig.PeerPrivKey)
 		if err != nil {
-			logger.Panic("error unmarshaling peerkey", zap.Error(err))
+			panic(errors.Wrap(err, "error unmarshaling peerkey"))
 		}
 
 		privKey, err = crypto.UnmarshalEd448PrivateKey(peerPrivKey)
 		if err != nil {
-			logger.Panic("error unmarshaling peerkey", zap.Error(err))
+			panic(errors.Wrap(err, "error unmarshaling peerkey"))
 		}
 
 		opts = append(opts, libp2p.Identity(privKey))
@@ -154,7 +152,7 @@ func NewBlossomSubStreamer(
 
 	h, err := libp2p.New(opts...)
 	if err != nil {
-		logger.Panic("error constructing p2p", zap.Error(err))
+		panic(errors.Wrap(err, "error constructing p2p"))
 	}
 
 	logger.Info("established peer id", zap.String("peer_id", h.ID().String()))
@@ -195,7 +193,7 @@ func NewBlossomSub(
 		for _, peerAddr := range config.BootstrapPeers {
 			peerinfo, err := peer.AddrInfoFromString(peerAddr)
 			if err != nil {
-				logger.Panic("error getting peer info", zap.Error(err))
+				panic(err)
 			}
 
 			if bytes.Equal([]byte(peerinfo.ID), []byte(peerId)) {
@@ -207,7 +205,7 @@ func NewBlossomSub(
 		for _, peerAddr := range p2pConfig.BootstrapPeers {
 			peerinfo, err := peer.AddrInfoFromString(peerAddr)
 			if err != nil {
-				logger.Panic("error getting peer info", zap.Error(err))
+				panic(err)
 			}
 
 			if bytes.Equal([]byte(peerinfo.ID), []byte(peerId)) {
@@ -228,7 +226,7 @@ func NewBlossomSub(
 	for _, peerAddr := range defaultBootstrapPeers {
 		peerinfo, err := peer.AddrInfoFromString(peerAddr)
 		if err != nil {
-			logger.Panic("error getting peer info", zap.Error(err))
+			panic(err)
 		}
 
 		bootstrappers = append(bootstrappers, *peerinfo)
@@ -238,12 +236,12 @@ func NewBlossomSub(
 	if p2pConfig.PeerPrivKey != "" {
 		peerPrivKey, err := hex.DecodeString(p2pConfig.PeerPrivKey)
 		if err != nil {
-			logger.Panic("error unmarshaling peerkey", zap.Error(err))
+			panic(errors.Wrap(err, "error unmarshaling peerkey"))
 		}
 
 		privKey, err = crypto.UnmarshalEd448PrivateKey(peerPrivKey)
 		if err != nil {
-			logger.Panic("error unmarshaling peerkey", zap.Error(err))
+			panic(errors.Wrap(err, "error unmarshaling peerkey"))
 		}
 
 		opts = append(opts, libp2p.Identity(privKey))
@@ -258,7 +256,7 @@ func NewBlossomSub(
 		for _, peerAddr := range p2pConfig.DirectPeers {
 			peerinfo, err := peer.AddrInfoFromString(peerAddr)
 			if err != nil {
-				logger.Panic("error getting peer info", zap.Error(err))
+				panic(err)
 			}
 			logger.Info("adding direct peer", zap.String("peer", peerinfo.ID.String()))
 			directPeers = append(directPeers, *peerinfo)
@@ -274,7 +272,7 @@ func NewBlossomSub(
 			connmgr.WithEmergencyTrim(true),
 		)
 		if err != nil {
-			logger.Panic("error creating connection manager", zap.Error(err))
+			panic(err)
 		}
 
 		rm, err := resourceManager(
@@ -282,7 +280,7 @@ func NewBlossomSub(
 			allowedPeers,
 		)
 		if err != nil {
-			logger.Panic("error creating resource manager", zap.Error(err))
+			panic(err)
 		}
 
 		opts = append(
@@ -307,7 +305,7 @@ func NewBlossomSub(
 
 	h, err := libp2p.New(opts...)
 	if err != nil {
-		logger.Panic("error constructing p2p", zap.Error(err))
+		panic(errors.Wrap(err, "error constructing p2p"))
 	}
 	idService := internal.IDServiceFromHost(h)
 
@@ -315,7 +313,7 @@ func NewBlossomSub(
 
 	reachabilitySub, err := h.EventBus().Subscribe(&event.EvtLocalReachabilityChanged{}, eventbus.Name("blossomsub"))
 	if err != nil {
-		logger.Panic("error subscribing to reachability events", zap.Error(err))
+		panic(err)
 	}
 	go func() {
 		defer reachabilitySub.Close()
@@ -368,7 +366,7 @@ func NewBlossomSub(
 		internal.NewStaticPeerSource(bootstrappers, true),
 	)
 	if err := bootstrap.Connect(ctx); err != nil {
-		logger.Panic("error connecting to bootstrap peers", zap.Error(err))
+		panic(err)
 	}
 	bootstrap = internal.NewConditionalPeerConnector(
 		ctx,
@@ -395,7 +393,7 @@ func NewBlossomSub(
 		),
 	)
 	if err := discovery.Connect(ctx); err != nil {
-		logger.Panic("error connecting to discovery peers", zap.Error(err))
+		panic(err)
 	}
 	discovery = internal.NewChainedPeerConnector(ctx, bootstrap, discovery)
 	bs.discovery = discovery
@@ -420,7 +418,7 @@ func NewBlossomSub(
 	} else {
 		tracer, err = blossomsub.NewJSONTracer(p2pConfig.TraceLogFile)
 		if err != nil {
-			logger.Panic("error building file tracer", zap.Error(err))
+			panic(errors.Wrap(err, "error building file tracer"))
 		}
 	}
 
@@ -486,7 +484,7 @@ func NewBlossomSub(
 	blossomOpts = append(blossomOpts, rt.WithDefaultTagTracer())
 	pubsub, err := blossomsub.NewBlossomSubWithRouter(ctx, h, rt, blossomOpts...)
 	if err != nil {
-		logger.Panic("error creating pubsub", zap.Error(err))
+		panic(err)
 	}
 
 	peerID := h.ID()
@@ -731,7 +729,10 @@ func (b *BlossomSub) GetPeerID() []byte {
 }
 
 func (b *BlossomSub) GetRandomPeer(bitmask []byte) ([]byte, error) {
-	peers := b.ps.ListPeers(bitmask)
+	// TODO: Fix this, it is broken - the bitmask parameter is not sliced, and the
+	// network is not pre-pended to the bitmask.
+	networkBitmask := append([]byte{b.p2pConfig.Network}, bitmask...)
+	peers := b.ps.ListPeers(networkBitmask)
 	if len(peers) == 0 {
 		return nil, errors.Wrap(
 			ErrNoPeersAvailable,
@@ -796,10 +797,10 @@ func initDHT(
 		opts...,
 	)
 	if err != nil {
-		logger.Panic("error creating dht", zap.Error(err))
+		panic(err)
 	}
 	if err := kademliaDHT.Bootstrap(ctx); err != nil {
-		logger.Panic("error bootstrapping dht", zap.Error(err))
+		panic(err)
 	}
 	return kademliaDHT
 }

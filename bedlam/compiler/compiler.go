@@ -71,6 +71,11 @@ func (c *Compiler) ParseFile(file string) (*ast.Package, error) {
 	return c.parse(file, f, logger, nil)
 }
 
+func (c *Compiler) Parse(data string) (*ast.Package, error) {
+	logger := utils.NewLogger(io.Discard)
+	return c.parse("{data}", strings.NewReader(data), logger, ast.NewPackage("main", "{data}", nil))
+}
+
 func (c *Compiler) compile(source string, in io.Reader, inputSizes [][]int) (
 	*circuit.Circuit, ast.Annotations, error) {
 

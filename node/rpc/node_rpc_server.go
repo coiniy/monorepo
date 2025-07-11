@@ -324,12 +324,12 @@ func (r *RPCServer) GetTokenInfo(
 		peerBytes := r.pubSub.GetPeerID()
 		peerAddr, err := poseidon.HashBytes(peerBytes)
 		if err != nil {
-			r.logger.Panic("failed to hash peer id", zap.Error(err))
+			panic(err)
 		}
 
 		addr, err := poseidon.HashBytes(provingKey.PublicKey)
 		if err != nil {
-			r.logger.Panic("failed to hash proving key", zap.Error(err))
+			panic(err)
 		}
 
 		addrBytes := addr.FillBytes(make([]byte, 32))
@@ -337,12 +337,12 @@ func (r *RPCServer) GetTokenInfo(
 
 		_, _, coins, err := r.coinStore.GetCoinsForOwner(addrBytes)
 		if err != nil {
-			r.logger.Panic("failed to get coins for owner", zap.Error(err))
+			panic(err)
 		}
 
 		_, _, otherCoins, err := r.coinStore.GetCoinsForOwner(peerAddrBytes)
 		if err != nil {
-			r.logger.Panic("failed to get coins for owner", zap.Error(err))
+			panic(err)
 		}
 
 		total := big.NewInt(0)

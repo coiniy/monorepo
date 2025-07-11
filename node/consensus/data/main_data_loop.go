@@ -26,12 +26,12 @@ func (
 		newTrie := &tries.RollingFrecencyCritbitTrie{}
 		b, err := trie.Serialize()
 		if err != nil {
-			e.logger.Panic("failed to serialize trie", zap.Error(err))
+			panic(err)
 		}
 
 		err = newTrie.Deserialize(b)
 		if err != nil {
-			e.logger.Panic("failed to deserialize trie", zap.Error(err))
+			panic(err)
 		}
 		frameProverTries[i] = newTrie
 	}
@@ -49,10 +49,10 @@ func (e *DataClockConsensusEngine) GetFrameProverTrie(i int) *tries.RollingFrece
 	}
 	b, err := e.frameProverTries[i].Serialize()
 	if err != nil {
-		e.logger.Panic("failed to serialize trie", zap.Error(err))
+		panic(err)
 	}
 	if err := newTrie.Deserialize(b); err != nil {
-		e.logger.Panic("failed to deserialize trie", zap.Error(err))
+		panic(err)
 	}
 	return newTrie
 }
@@ -112,7 +112,7 @@ outer:
 		case <-time.After(1 * time.Minute):
 			head, err := e.dataTimeReel.Head()
 			if err != nil {
-				e.logger.Panic("failed to get head frame", zap.Error(err))
+				panic(err)
 			}
 
 			if head.FrameNumber <= maxFrames ||
@@ -193,14 +193,14 @@ func (e *DataClockConsensusEngine) runLoop() {
 		} else {
 			latestFrame, err := e.dataTimeReel.Head()
 			if err != nil {
-				e.logger.Panic("failed to get head frame", zap.Error(err))
+				panic(err)
 			}
 
 			if runOnce {
 				if e.FrameProverTrieContains(0, e.provingKeyAddress) {
 					dataFrame, err := e.dataTimeReel.Head()
 					if err != nil {
-						e.logger.Panic("failed to get head frame", zap.Error(err))
+						panic(err)
 					}
 
 					latestFrame = e.processFrame(latestFrame, dataFrame)

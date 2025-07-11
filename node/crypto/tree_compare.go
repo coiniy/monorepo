@@ -3,15 +3,10 @@ package crypto
 import (
 	"bytes"
 	"fmt"
-	"slices"
-	"strings"
-
-	"go.uber.org/zap"
-	"source.quilibrium.com/quilibrium/monorepo/node/utils"
 )
 
 // CompareTreesAtHeight compares two vector commitment trees at each level
-func CompareTreesAtHeight(tree1, tree2 *LazyVectorCommitmentTree) [][]ComparisonResult {
+func CompareTreesAtHeight(tree1, tree2 *VectorCommitmentTree) [][]ComparisonResult {
 	if tree1 == nil || tree2 == nil {
 		return nil
 	}
@@ -36,7 +31,7 @@ type ComparisonResult struct {
 	Matches bool   // Whether the commitments match
 }
 
-func getMaxHeight(node1, node2 LazyVectorCommitmentNode) int {
+func getMaxHeight(node1, node2 VectorCommitmentNode) int {
 	height1 := getHeight(node1)
 	height2 := getHeight(node2)
 	if height1 > height2 {
@@ -45,15 +40,15 @@ func getMaxHeight(node1, node2 LazyVectorCommitmentNode) int {
 	return height2
 }
 
-func getHeight(node LazyVectorCommitmentNode) int {
+func getHeight(node VectorCommitmentNode) int {
 	if node == nil {
 		return 0
 	}
 
 	switch n := node.(type) {
-	case *LazyVectorCommitmentLeafNode:
+	case *VectorCommitmentLeafNode:
 		return 0
-	case *LazyVectorCommitmentBranchNode:
+	case *VectorCommitmentBranchNode:
 		maxChildHeight := 0
 		for _, child := range n.Children {
 			childHeight := getHeight(child)
@@ -66,11 +61,7 @@ func getHeight(node LazyVectorCommitmentNode) int {
 	return 0
 }
 
-func compareLevelCommits(
-	node1, node2 LazyVectorCommitmentNode,
-	targetHeight, currentHeight int,
-) []ComparisonResult {
-	logger := utils.GetLogger()
+func compareLevelCommits(node1, node2 VectorCommitmentNode, targetHeight, currentHeight int) []ComparisonResult {
 	if node1 == nil && node2 == nil {
 		return nil
 	}
@@ -79,26 +70,10 @@ func compareLevelCommits(
 	if currentHeight == targetHeight {
 		var commit1, commit2 []byte
 		if node1 != nil {
-			leaf1, lok := node1.(*LazyVectorCommitmentLeafNode)
-			branch1, bok := node1.(*LazyVectorCommitmentBranchNode)
-			if lok {
-				commit1 = leaf1.Commitment
-			} else if bok {
-				commit1 = branch1.Commitment
-			} else {
-				logger.Panic("invalid node type")
-			}
+			commit1 = node1.Commit(false)
 		}
 		if node2 != nil {
-			leaf2, lok := node1.(*LazyVectorCommitmentLeafNode)
-			branch2, bok := node1.(*LazyVectorCommitmentBranchNode)
-			if lok {
-				commit2 = leaf2.Commitment
-			} else if bok {
-				commit2 = branch2.Commitment
-			} else {
-				logger.Panic("invalid node type")
-			}
+			commit2 = node2.Commit(false)
 		}
 
 		return []ComparisonResult{{
@@ -114,8 +89,8 @@ func compareLevelCommits(
 
 	// Handle branch nodes
 	switch n1 := node1.(type) {
-	case *LazyVectorCommitmentBranchNode:
-		n2, ok := node2.(*LazyVectorCommitmentBranchNode)
+	case *VectorCommitmentBranchNode:
+		n2, ok := node2.(*VectorCommitmentBranchNode)
 		if !ok {
 			// Trees have different structure at this point
 			return results
@@ -140,7 +115,7 @@ func compareLevelCommits(
 }
 
 // TraverseAndCompare provides a channel-based iterator for comparing trees
-func TraverseAndCompare(tree1, tree2 *LazyVectorCommitmentTree) chan ComparisonResult {
+func TraverseAndCompare(tree1, tree2 *VectorCommitmentTree) chan ComparisonResult {
 	resultChan := make(chan ComparisonResult)
 
 	go func() {
@@ -175,26 +150,16 @@ type LeafDifference struct {
 }
 
 // CompareLeaves returns all leaves that differ between the two trees
-func CompareLeaves(tree1, tree2 *LazyVectorCommitmentTree) []LeafDifference {
+func CompareLeaves(tree1, tree2 *VectorCommitmentTree) []LeafDifference {
 	// Get all leaves from both trees
-	leaves1 := GetAllLeaves(
-		tree1.SetType,
-		tree1.PhaseType,
-		tree1.ShardKey,
-		tree1.Root,
-	)
-	leaves2 := GetAllLeaves(
-		tree2.SetType,
-		tree2.PhaseType,
-		tree2.ShardKey,
-		tree2.Root,
-	)
+	leaves1 := GetAllLeaves(tree1.Root)
+	leaves2 := GetAllLeaves(tree2.Root)
 
 	differences := make([]LeafDifference, 0)
 
 	// Use maps for efficient lookup
-	leafMap1 := make(map[string]*LazyVectorCommitmentLeafNode)
-	leafMap2 := make(map[string]*LazyVectorCommitmentLeafNode)
+	leafMap1 := make(map[string]*VectorCommitmentLeafNode)
+	leafMap2 := make(map[string]*VectorCommitmentLeafNode)
 
 	// Build maps
 	for _, leaf := range leaves1 {
@@ -241,10 +206,8 @@ func CompareLeaves(tree1, tree2 *LazyVectorCommitmentTree) []LeafDifference {
 	return differences
 }
 
-// GetAllPreloadedLeaves returns all leaf nodes in the tree
-func GetAllPreloadedLeaves(
-	node VectorCommitmentNode,
-) []*VectorCommitmentLeafNode {
+// GetAllLeaves returns all leaf nodes in the tree
+func GetAllLeaves(node VectorCommitmentNode) []*VectorCommitmentLeafNode {
 	if node == nil {
 		return nil
 	}
@@ -257,95 +220,7 @@ func GetAllPreloadedLeaves(
 	case *VectorCommitmentBranchNode:
 		for _, child := range n.Children {
 			if child != nil {
-				childLeaves := GetAllPreloadedLeaves(
-					child,
-				)
-				leaves = append(leaves, childLeaves...)
-			}
-		}
-	}
-
-	return leaves
-}
-
-func ConvertAllPreloadedLeaves(
-	atomType string,
-	phaseType string,
-	shardKey ShardKey,
-	store TreeBackingStore,
-	node LazyVectorCommitmentNode,
-	path []int,
-) []*LazyVectorCommitmentLeafNode {
-	if node == nil {
-		return nil
-	}
-
-	var leaves []*LazyVectorCommitmentLeafNode
-
-	switch n := node.(type) {
-	case *LazyVectorCommitmentLeafNode:
-		leaves = append(leaves, n)
-	case *LazyVectorCommitmentBranchNode:
-		n.FullPrefix = slices.Concat(path, n.Prefix)
-		n.FullyLoaded = true
-		n.Store = store
-		for i, child := range n.Children {
-			if child != nil {
-				childLeaves := ConvertAllPreloadedLeaves(
-					atomType,
-					phaseType,
-					shardKey,
-					store,
-					child,
-					slices.Concat(path, n.Prefix, []int{i}),
-				)
-				leaves = append(leaves, childLeaves...)
-			}
-		}
-	}
-
-	return leaves
-}
-
-// GetAllLeaves returns all leaf nodes in the tree
-func GetAllLeaves(
-	setType string,
-	phaseType string,
-	shardKey ShardKey,
-	node LazyVectorCommitmentNode,
-) []*LazyVectorCommitmentLeafNode {
-	if node == nil {
-		return nil
-	}
-
-	var leaves []*LazyVectorCommitmentLeafNode
-
-	switch n := node.(type) {
-	case *LazyVectorCommitmentLeafNode:
-		leaves = append(leaves, n)
-	case *LazyVectorCommitmentBranchNode:
-		for i, child := range n.Children {
-			child := child
-			i := i
-			var err error
-			if child == nil {
-				child, err = n.Store.GetNodeByPath(
-					setType,
-					phaseType,
-					shardKey,
-					slices.Concat(n.FullPrefix, []int{i}),
-				)
-				if err != nil && !strings.Contains(err.Error(), "item not found") {
-					utils.GetLogger().Panic("failed to get node by path", zap.Error(err))
-				}
-			}
-			if child != nil {
-				childLeaves := GetAllLeaves(
-					setType,
-					phaseType,
-					shardKey,
-					child,
-				)
+				childLeaves := GetAllLeaves(child)
 				leaves = append(leaves, childLeaves...)
 			}
 		}
@@ -356,8 +231,8 @@ func GetAllLeaves(
 
 func ExampleComparison() {
 	// Create and populate two trees
-	tree1 := &LazyVectorCommitmentTree{}
-	tree2 := &LazyVectorCommitmentTree{}
+	tree1 := &VectorCommitmentTree{}
+	tree2 := &VectorCommitmentTree{}
 
 	// Compare trees using channel-based iterator
 	for result := range TraverseAndCompare(tree1, tree2) {

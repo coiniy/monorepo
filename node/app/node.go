@@ -15,20 +15,10 @@ import (
 	"source.quilibrium.com/quilibrium/monorepo/node/execution/intrinsics/token"
 	"source.quilibrium.com/quilibrium/monorepo/node/keys"
 	"source.quilibrium.com/quilibrium/monorepo/node/p2p"
-	"source.quilibrium.com/quilibrium/monorepo/node/rpc"
 	"source.quilibrium.com/quilibrium/monorepo/node/store"
-	"source.quilibrium.com/quilibrium/monorepo/node/utils"
-)
-
-type NodeMode string
-
-const (
-	NormalNodeMode     = NodeMode("normal")
-	StrictSyncNodeMode = NodeMode("strict-sync")
 )
 
 type Node struct {
-	mode           NodeMode
 	logger         *zap.Logger
 	dataProofStore store.DataProofStore
 	clockStore     store.ClockStore
@@ -38,7 +28,6 @@ type Node struct {
 	execEngines    map[string]execution.ExecutionEngine
 	engine         consensus.ConsensusEngine
 	pebble         store.KVDB
-	synchronizer   rpc.Synchronizer
 }
 
 type DHTNode struct {
@@ -52,27 +41,6 @@ func newDHTNode(
 	return &DHTNode{
 		pubSub: pubSub,
 		quit:   make(chan struct{}),
-	}, nil
-}
-
-func newStrictSyncNode(
-	logger *zap.Logger,
-	dataProofStore store.DataProofStore,
-	clockStore store.ClockStore,
-	coinStore store.CoinStore,
-	keyManager keys.KeyManager,
-	pebble store.KVDB,
-	synchronizer rpc.Synchronizer,
-) (*Node, error) {
-	return &Node{
-		mode:           StrictSyncNodeMode,
-		logger:         logger,
-		dataProofStore: dataProofStore,
-		clockStore:     clockStore,
-		coinStore:      coinStore,
-		keyManager:     keyManager,
-		pebble:         pebble,
-		synchronizer:   synchronizer,
 	}, nil
 }
 
@@ -97,17 +65,15 @@ func newNode(
 	}
 
 	return &Node{
-		mode:           NormalNodeMode,
-		logger:         logger,
-		dataProofStore: dataProofStore,
-		clockStore:     clockStore,
-		coinStore:      coinStore,
-		keyManager:     keyManager,
-		pubSub:         pubSub,
-		execEngines:    execEngines,
-		engine:         engine,
-		pebble:         pebble,
-		synchronizer:   nil,
+		logger,
+		dataProofStore,
+		clockStore,
+		coinStore,
+		keyManager,
+		pubSub,
+		execEngines,
+		engine,
+		pebble,
 	}, nil
 }
 
@@ -137,21 +103,19 @@ func nearestApplicablePowerOfTwo(number uint64) uint64 {
 }
 
 func (n *Node) VerifyProofIntegrity() {
-	logger := utils.GetLogger().With(zap.String("stage", "verify-proof-integrity"))
 	i, _, _, e := n.dataProofStore.GetLatestDataTimeProof(n.pubSub.GetPeerID())
 	if e != nil {
-		logger.Panic("failed to get latest data time proof", zap.Error(e))
+		panic(e)
 	}
 
 	dataProver := crypto.NewKZGInclusionProver(n.logger)
 	wesoProver := crypto.NewWesolowskiFrameProver(n.logger)
 
 	for j := int(i); j >= 0; j-- {
-		loggerWithIncrement := logger.With(zap.Int("increment", j))
-		loggerWithIncrement.Info("verifying proof")
+		fmt.Println(j)
 		_, parallelism, input, o, err := n.dataProofStore.GetDataTimeProof(n.pubSub.GetPeerID(), uint32(j))
 		if err != nil {
-			loggerWithIncrement.Panic("failed to get data time proof", zap.Error(err))
+			panic(err)
 		}
 		idx, idxProof, idxCommit, idxKP := GetOutputs(o)
 
@@ -165,19 +129,19 @@ func (n *Node) VerifyProofIntegrity() {
 			nearestApplicablePowerOfTwo(uint64(parallelism)),
 		)
 		if err != nil {
-			loggerWithIncrement.Panic("failed to verify kzg proof", zap.Error(err))
+			panic(err)
 		}
 
 		if !v {
-			loggerWithIncrement.Panic("bad kzg proof")
+			panic(fmt.Sprintf("bad kzg proof at increment %d", j))
 		}
 		wp := []byte{}
 		wp = append(wp, n.pubSub.GetPeerID()...)
 		wp = append(wp, input...)
-		loggerWithIncrement.Info("build weso proof", zap.String("wp", fmt.Sprintf("%x", wp)))
+		fmt.Printf("%x\n", wp)
 		v = wesoProver.VerifyPreDuskChallengeProof(wp, uint32(j), idx, idxProof)
 		if !v {
-			loggerWithIncrement.Panic("bad weso proof")
+			panic(fmt.Sprintf("bad weso proof at increment %d", j))
 		}
 	}
 }
@@ -193,41 +157,29 @@ func (d *DHTNode) Stop() {
 }
 
 func (n *Node) Start() {
-	logger := utils.GetLogger()
-	switch n.mode {
-	case NormalNodeMode:
-		err := <-n.engine.Start()
-		if err != nil {
-			logger.Panic("failed to start engine", zap.Error(err))
-		}
-
-		// TODO: add config mapping to engine name/frame registration
-		wg := sync.WaitGroup{}
-		for _, e := range n.execEngines {
-			wg.Add(1)
-			go func(e execution.ExecutionEngine) {
-				defer wg.Done()
-				if err := <-n.engine.RegisterExecutor(e, 0); err != nil {
-					logger.Panic("failed to register executor", zap.Error(err))
-				}
-			}(e)
-		}
-		wg.Wait()
-	case StrictSyncNodeMode:
-		go n.synchronizer.Start(n.logger, n.pebble)
+	err := <-n.engine.Start()
+	if err != nil {
+		panic(err)
 	}
+
+	// TODO: add config mapping to engine name/frame registration
+	wg := sync.WaitGroup{}
+	for _, e := range n.execEngines {
+		wg.Add(1)
+		go func(e execution.ExecutionEngine) {
+			defer wg.Done()
+			if err := <-n.engine.RegisterExecutor(e, 0); err != nil {
+				panic(err)
+			}
+		}(e)
+	}
+	wg.Wait()
 }
 
 func (n *Node) Stop() {
-	logger := utils.GetLogger()
-	switch n.mode {
-	case NormalNodeMode:
-		err := <-n.engine.Stop(false)
-		if err != nil {
-			logger.Panic("failed to stop engine", zap.Error(err))
-		}
-	case StrictSyncNodeMode:
-		n.synchronizer.Stop()
+	err := <-n.engine.Stop(false)
+	if err != nil {
+		panic(err)
 	}
 
 	n.pebble.Close()

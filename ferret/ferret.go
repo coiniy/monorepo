@@ -1,8 +1,9 @@
 package ferret
 
 import (
-	"errors"
+	"fmt"
 
+	"github.com/pkg/errors"
 	generated "source.quilibrium.com/quilibrium/monorepo/ferret/generated/ferret"
 )
 
@@ -19,16 +20,45 @@ type FerretOT struct {
 	netio     *generated.NetIoManager
 }
 
-func NewFerretOT(party int, address string, port int, threads int, length uint64, choices []bool, malicious bool) (*FerretOT, error) {
+func NewFerretOT(
+	party int,
+	address string,
+	port int,
+	threads int,
+	length uint64,
+	choices []bool,
+	malicious bool,
+) (*FerretOT, error) {
+	if threads > 1 {
+		fmt.Println(
+			"!!!WARNING!!! THERE BE DRAGONS. RUNNING MULTITHREADED MODE IN SOME " +
+				"SITUATIONS HAS LEAD TO CRASHES AND OTHER ISSUES. IF YOU STILL WISH " +
+				"TO DO THIS, YOU WILL NEED TO MANUALLY UPDATE THE BUILD AND REMOVE " +
+				"THIS CHECK. DO SO AT YOUR OWN RISK",
+		)
+		return nil, errors.Wrap(errors.New("invalid thread count"), "new ferret ot")
+	}
+
 	var addr *string
 	if address != "" {
 		addrCopy := address
 		addr = &addrCopy
 	}
 
-	netio := generated.CreateNetioManager(int32(party), addr, int32(port))
+	netio := generated.CreateNetioManager(
+		int32(party),
+		addr,
+		int32(port),
+	)
 
-	ferretCOT := generated.CreateFerretCotManager(int32(party), int32(threads), length, choices, netio, malicious)
+	ferretCOT := generated.CreateFerretCotManager(
+		int32(party),
+		int32(threads),
+		length,
+		choices,
+		netio,
+		malicious,
+	)
 
 	return &FerretOT{
 		party:     party,

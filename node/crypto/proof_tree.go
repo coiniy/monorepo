@@ -8,12 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"slices"
-	"strings"
-	"sync"
 
 	rbls48581 "source.quilibrium.com/quilibrium/monorepo/bls48581"
-	"source.quilibrium.com/quilibrium/monorepo/node/internal/runtime"
 )
 
 func init() {
@@ -22,12 +18,9 @@ func init() {
 }
 
 const (
-	BranchNodes      = 64
-	BranchBits       = 6 // log2(64)
-	BranchMask       = BranchNodes - 1
-	TypeNil     byte = 0
-	TypeLeaf    byte = 1
-	TypeBranch  byte = 2
+	BranchNodes = 64
+	BranchBits  = 6 // log2(64)
+	BranchMask  = BranchNodes - 1
 )
 
 type VectorCommitmentNode interface {
@@ -73,40 +66,28 @@ func (n *VectorCommitmentLeafNode) GetSize() *big.Int {
 
 func (n *VectorCommitmentBranchNode) Commit(recalculate bool) []byte {
 	if n.Commitment == nil || recalculate {
-		vector := make([][]byte, len(n.Children))
-		wg := sync.WaitGroup{}
-		throttle := make(chan struct{}, runtime.WorkerCount(0, false))
-		for i, child := range n.Children {
-			throttle <- struct{}{}
-			wg.Add(1)
-			go func(i int, child VectorCommitmentNode) {
-				defer func() { <-throttle }()
-				defer wg.Done()
-				if child != nil {
-					out := child.Commit(recalculate)
-					switch c := child.(type) {
-					case *VectorCommitmentBranchNode:
-						h := sha512.New()
-						h.Write([]byte{1})
-						for _, p := range c.Prefix {
-							h.Write(binary.BigEndian.AppendUint32([]byte{}, uint32(p)))
-						}
-						h.Write(out)
-						out = h.Sum(nil)
-					case *VectorCommitmentLeafNode:
-						// do nothing
-					}
-					vector[i] = out
-				} else {
-					vector[i] = make([]byte, 64)
-				}
-			}(i, child)
-		}
-		wg.Wait()
 		data := []byte{}
-		for _, vec := range vector {
-			data = append(data, vec...)
+		for _, child := range n.Children {
+			if child != nil {
+				out := child.Commit(recalculate)
+				switch c := child.(type) {
+				case *VectorCommitmentBranchNode:
+					h := sha512.New()
+					h.Write([]byte{1})
+					for _, p := range c.Prefix {
+						h.Write(binary.BigEndian.AppendUint32([]byte{}, uint32(p)))
+					}
+					h.Write(out)
+					out = h.Sum(nil)
+				case *VectorCommitmentLeafNode:
+					// do nothing
+				}
+				data = append(data, out...)
+			} else {
+				data = append(data, make([]byte, 64)...)
+			}
 		}
+
 		n.Commitment = rbls48581.CommitRaw(data, 64)
 	}
 
@@ -202,7 +183,7 @@ type VectorCommitmentTree struct {
 func getNextNibble(key []byte, pos int) int {
 	startByte := pos / 8
 	if startByte >= len(key) {
-		return -1
+		return 0
 	}
 
 	// Calculate how many bits we need from the current byte
@@ -234,12 +215,45 @@ func getNibblesUntilDiverge(key1, key2 []byte, startDepth int) ([]int, int) {
 	for {
 		n1 := getNextNibble(key1, depth)
 		n2 := getNextNibble(key2, depth)
-		if n1 == -1 || n2 == -1 || n1 != n2 {
+		if n1 != n2 {
 			return nibbles, depth
 		}
 		nibbles = append(nibbles, n1)
 		depth += BranchBits
 	}
+}
+
+func recalcMetadata(node VectorCommitmentNode) (
+	leafCount int,
+	longestBranch int,
+	size *big.Int,
+) {
+	switch n := node.(type) {
+	case *VectorCommitmentLeafNode:
+		// A leaf counts as one, and its depth (from itself) is zero.
+		return 1, 0, n.Size
+	case *VectorCommitmentBranchNode:
+		totalLeaves := 0
+		maxChildDepth := 0
+		size := new(big.Int)
+		for _, child := range n.Children {
+			if child != nil {
+				cLeaves, cDepth, cSize := recalcMetadata(child)
+				totalLeaves += cLeaves
+				size.Add(size, cSize)
+				if cDepth > maxChildDepth {
+					maxChildDepth = cDepth
+				}
+			}
+		}
+		// Store the aggregated values in the branch node.
+		n.LeafCount = totalLeaves
+		// The branch’s longest branch is one more than its deepest child.
+		n.LongestBranch = maxChildDepth + 1
+		n.Size = size
+		return totalLeaves, n.LongestBranch, n.Size
+	}
+	return 0, 0, new(big.Int)
 }
 
 // Insert adds or updates a key-value pair in the tree
@@ -250,10 +264,11 @@ func (t *VectorCommitmentTree) Insert(
 	if len(key) == 0 {
 		return errors.New("empty key not allowed")
 	}
-	var insert func(node VectorCommitmentNode, depth int) (int, VectorCommitmentNode)
-	insert = func(node VectorCommitmentNode, depth int) (int, VectorCommitmentNode) {
+
+	var insert func(node VectorCommitmentNode, depth int) VectorCommitmentNode
+	insert = func(node VectorCommitmentNode, depth int) VectorCommitmentNode {
 		if node == nil {
-			return 1, &VectorCommitmentLeafNode{
+			return &VectorCommitmentLeafNode{
 				Key:        key,
 				Value:      value,
 				HashTarget: hashTarget,
@@ -268,7 +283,7 @@ func (t *VectorCommitmentTree) Insert(
 				n.HashTarget = hashTarget
 				n.Commitment = nil
 				n.Size = size
-				return 0, n
+				return n
 			}
 
 			// Get common prefix nibbles and divergence point
@@ -276,10 +291,7 @@ func (t *VectorCommitmentTree) Insert(
 
 			// Create single branch node with shared prefix
 			branch := &VectorCommitmentBranchNode{
-				Prefix:        sharedNibbles,
-				LeafCount:     2,
-				LongestBranch: 1,
-				Size:          new(big.Int).Add(n.Size, size),
+				Prefix: sharedNibbles,
 			}
 
 			// Add both leaves at their final positions
@@ -293,7 +305,7 @@ func (t *VectorCommitmentTree) Insert(
 				Size:       size,
 			}
 
-			return 1, branch
+			return branch
 
 		case *VectorCommitmentBranchNode:
 			if len(n.Prefix) > 0 {
@@ -303,10 +315,7 @@ func (t *VectorCommitmentTree) Insert(
 					if actualNibble != expectedNibble {
 						// Create new branch with shared prefix subset
 						newBranch := &VectorCommitmentBranchNode{
-							Prefix:        n.Prefix[:i],
-							LeafCount:     n.LeafCount + 1,
-							LongestBranch: n.LongestBranch + 1,
-							Size:          new(big.Int).Add(n.Size, size),
+							Prefix: n.Prefix[:i],
 						}
 						// Position old branch and new leaf
 						newBranch.Children[expectedNibble] = n
@@ -317,57 +326,34 @@ func (t *VectorCommitmentTree) Insert(
 							HashTarget: hashTarget,
 							Size:       size,
 						}
-						return 1, newBranch
+						recalcMetadata(newBranch)
+						return newBranch
 					}
 				}
 
 				// Key matches prefix, continue with final nibble
 				finalNibble := getNextNibble(key, depth+len(n.Prefix)*BranchBits)
-				delta, inserted := insert(
+				n.Children[finalNibble] = insert(
 					n.Children[finalNibble],
 					depth+len(n.Prefix)*BranchBits+BranchBits,
 				)
-				n.Children[finalNibble] = inserted
 				n.Commitment = nil
-				n.LeafCount += delta
-				switch i := inserted.(type) {
-				case *VectorCommitmentBranchNode:
-					if n.LongestBranch <= i.LongestBranch {
-						n.LongestBranch = i.LongestBranch + 1
-					}
-				case *VectorCommitmentLeafNode:
-					n.LongestBranch = 1
-				}
-				if delta != 0 {
-					n.Size = n.Size.Add(n.Size, size)
-				}
-				return delta, n
+				recalcMetadata(n)
+				return n
 			} else {
 				// Simple branch without prefix
 				nibble := getNextNibble(key, depth)
-				delta, inserted := insert(n.Children[nibble], depth+BranchBits)
-				n.Children[nibble] = inserted
+				n.Children[nibble] = insert(n.Children[nibble], depth+BranchBits)
 				n.Commitment = nil
-				n.LeafCount += delta
-				switch i := inserted.(type) {
-				case *VectorCommitmentBranchNode:
-					if n.LongestBranch <= i.LongestBranch {
-						n.LongestBranch = i.LongestBranch + 1
-					}
-				case *VectorCommitmentLeafNode:
-					n.LongestBranch = 1
-				}
-				if delta != 0 {
-					n.Size = n.Size.Add(n.Size, size)
-				}
-				return delta, n
+				recalcMetadata(n)
+				return n
 			}
 		}
 
-		return 0, nil
+		return nil
 	}
 
-	_, t.Root = insert(t.Root, 0)
+	t.Root = insert(t.Root, 0)
 	return nil
 }
 
@@ -504,31 +490,30 @@ func (t *VectorCommitmentTree) Delete(key []byte) error {
 		return errors.New("empty key not allowed")
 	}
 
-	var remove func(node VectorCommitmentNode, depth int) (*big.Int, VectorCommitmentNode)
-	remove = func(node VectorCommitmentNode, depth int) (*big.Int, VectorCommitmentNode) {
+	var remove func(node VectorCommitmentNode, depth int) VectorCommitmentNode
+	remove = func(node VectorCommitmentNode, depth int) VectorCommitmentNode {
 		if node == nil {
-			return big.NewInt(0), nil
+			return nil
 		}
 
 		switch n := node.(type) {
 
 		case *VectorCommitmentLeafNode:
 			if bytes.Equal(n.Key, key) {
-				return n.Size, nil
+				return nil
 			}
-			return big.NewInt(0), n
+			return n
 
 		case *VectorCommitmentBranchNode:
 			for i, expectedNibble := range n.Prefix {
 				currentNibble := getNextNibble(key, depth+i*BranchBits)
 				if currentNibble != expectedNibble {
-					return big.NewInt(0), n
+					return n
 				}
 			}
 
 			finalNibble := getNextNibble(key, depth+len(n.Prefix)*BranchBits)
-			var size *big.Int
-			size, n.Children[finalNibble] =
+			n.Children[finalNibble] =
 				remove(n.Children[finalNibble], depth+len(n.Prefix)*BranchBits+BranchBits)
 
 			n.Commitment = nil
@@ -536,22 +521,11 @@ func (t *VectorCommitmentTree) Delete(key []byte) error {
 			childCount := 0
 			var lastChild VectorCommitmentNode
 			var lastChildIndex int
-			longestBranch := 1
-			leaves := 0
 			for i, child := range n.Children {
 				if child != nil {
 					childCount++
 					lastChild = child
 					lastChildIndex = i
-					switch c := child.(type) {
-					case *VectorCommitmentBranchNode:
-						leaves += c.LeafCount
-						if longestBranch < c.LongestBranch+1 {
-							longestBranch = c.LongestBranch + 1
-						}
-					case *VectorCommitmentLeafNode:
-						leaves += 1
-					}
 				}
 			}
 
@@ -575,19 +549,20 @@ func (t *VectorCommitmentTree) Delete(key []byte) error {
 					retNode = lastChild
 				}
 			default:
-				n.LongestBranch = longestBranch
-				n.LeafCount = leaves
-				n.Size = n.Size.Sub(n.Size, size)
 				retNode = n
 			}
 
-			return size, retNode
+			if branch, ok := retNode.(*VectorCommitmentBranchNode); ok {
+				recalcMetadata(branch)
+			}
+
+			return retNode
 		default:
-			return big.NewInt(0), node
+			return node
 		}
 	}
 
-	_, t.Root = remove(t.Root, 0)
+	t.Root = remove(t.Root, 0)
 	return nil
 }
 
@@ -615,32 +590,20 @@ func (t *VectorCommitmentTree) GetSize() *big.Int {
 	return t.Root.GetSize()
 }
 
-func DebugNode(setType, phaseType string, shardKey ShardKey, node LazyVectorCommitmentNode, depth int, prefix string) {
+func DebugNode(node VectorCommitmentNode, depth int, prefix string) {
 	if node == nil {
 		return
 	}
 
 	switch n := node.(type) {
-	case *LazyVectorCommitmentLeafNode:
+	case *VectorCommitmentLeafNode:
 		fmt.Printf("%sLeaf: key=%x value=%x\n", prefix, n.Key, n.Value)
-	case *LazyVectorCommitmentBranchNode:
+	case *VectorCommitmentBranchNode:
 		fmt.Printf("%sBranch %v:\n", prefix, n.Prefix)
 		for i, child := range n.Children {
-			if child == nil {
-				var err error
-				child, err = n.Store.GetNodeByPath(
-					setType,
-					phaseType,
-					shardKey,
-					slices.Concat(n.FullPrefix, []int{i}),
-				)
-				if err != nil && !strings.Contains(err.Error(), "not found") {
-					panic(err)
-				}
-			}
 			if child != nil {
 				fmt.Printf("%s  [%d]:\n", prefix, i)
-				DebugNode(setType, phaseType, shardKey, child, depth+1, prefix+"    ")
+				DebugNode(child, depth+1, prefix+"    ")
 			}
 		}
 	}

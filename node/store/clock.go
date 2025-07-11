@@ -1287,7 +1287,7 @@ func (p *PebbleClockStore) Compact(
 
 				selector, err := frame.GetSelector()
 				if err != nil {
-					p.logger.Panic("failed to get selector from frame", zap.Error(err))
+					panic(err)
 				}
 
 				parents = append(parents,
@@ -1302,7 +1302,7 @@ func (p *PebbleClockStore) Compact(
 
 				selector, err := frame.GetSelector()
 				if err != nil {
-					p.logger.Panic("failed to get selector from frame", zap.Error(err))
+					panic(err)
 				}
 
 				err = p.db.Set(
