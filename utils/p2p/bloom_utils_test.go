@@ -77,6 +77,14 @@ func TestGetBloomFilter(t *testing.T) {
 }
 
 func TestGetBloomFilterIndices(t *testing.T) {
+	poseidonFieldZeroTest := p2p.GetBloomFilterIndices(make([]byte, 32), 256, 3)
+	assert.ElementsMatch(t, poseidonFieldZeroTest, []byte{0x00, 0x00, 0x00})
+
+	outOfField := make([]byte, 32)
+	outOfField[0] = 0x3f
+	poseidonFieldInfinityTest := p2p.GetBloomFilterIndices(outOfField, 256, 3)
+	assert.ElementsMatch(t, poseidonFieldInfinityTest, []byte{0x00, 0x00, 0x00})
+
 	fourByteThreeKTest := p2p.GetBloomFilterIndices(
 		[]byte{0x00, 0x00, 0x00, 0x00},
 		256,

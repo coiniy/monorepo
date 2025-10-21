@@ -5,11 +5,30 @@ import (
 
 	"source.quilibrium.com/quilibrium/monorepo/protobufs"
 	"source.quilibrium.com/quilibrium/monorepo/types/crypto"
-	"source.quilibrium.com/quilibrium/monorepo/types/tries"
 )
 
 type MockFrameProver struct {
 	mock.Mock
+}
+
+func (m *MockFrameProver) CalculateMultiProof(
+	challenge [32]byte,
+	difficulty uint32,
+	ids [][]byte,
+	index uint32,
+) [516]byte {
+	args := m.Called(challenge, difficulty, ids, index)
+	return args.Get(0).([516]byte)
+}
+
+func (m *MockFrameProver) VerifyMultiProof(
+	challenge [32]byte,
+	difficulty uint32,
+	ids [][]byte,
+	allegedSolutions [][516]byte,
+) (bool, error) {
+	args := m.Called(challenge, difficulty, ids, allegedSolutions)
+	return args.Bool(0), args.Error(1)
 }
 
 func (m *MockFrameProver) ProveFrameHeaderGenesis(
@@ -99,8 +118,6 @@ func (m *MockFrameProver) ProveGlobalFrameHeader(
 	previousFrame *protobufs.GlobalFrameHeader,
 	commitments [][]byte,
 	proverRoot []byte,
-	stagedRoot []byte,
-	deploymentsRoot []byte,
 	provingKey crypto.Signer,
 	timestamp int64,
 	difficulty uint32,
@@ -110,8 +127,6 @@ func (m *MockFrameProver) ProveGlobalFrameHeader(
 		previousFrame,
 		commitments,
 		proverRoot,
-		stagedRoot,
-		deploymentsRoot,
 		provingKey,
 		timestamp,
 		difficulty,
@@ -132,32 +147,4 @@ func (m *MockFrameProver) VerifyGlobalFrameHeader(
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]uint8), args.Error(1)
-}
-
-func (m *MockFrameProver) CreateMasterGenesisFrame(
-	filter []byte,
-	seed []byte,
-	difficulty uint32,
-) (*protobufs.ClockFrame, error) {
-	args := m.Called(filter, seed, difficulty)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*protobufs.ClockFrame), args.Error(1)
-}
-
-func (m *MockFrameProver) CreateDataGenesisFrame(
-	filter []byte,
-	origin []byte,
-	difficulty uint32,
-	inclusionProof *crypto.InclusionAggregateProof,
-	proverKeys [][]byte,
-) (*protobufs.ClockFrame, []*tries.RollingFrecencyCritbitTrie, error) {
-	args := m.Called(filter, origin, difficulty, inclusionProof, proverKeys)
-	if args.Get(0) == nil {
-		return nil, nil, args.Error(2)
-	}
-	return args.Get(0).(*protobufs.ClockFrame),
-		args.Get(1).([]*tries.RollingFrecencyCritbitTrie),
-		args.Error(2)
 }

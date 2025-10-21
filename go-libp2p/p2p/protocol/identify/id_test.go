@@ -38,11 +38,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func tStringCast(s string) ma.Multiaddr {
-	st, _ := ma.StringCast(s)
-	return st
-}
-
 func testKnowsAddrs(t *testing.T, h host.Host, p peer.ID, expected []ma.Multiaddr) {
 	t.Helper()
 	require.True(t, matest.AssertMultiaddrsMatch(t, expected, h.Peerstore().Addrs(p)), fmt.Sprintf("%s did not have addr for %s", h.ID(), p))
@@ -113,121 +108,109 @@ func emitAddrChangeEvt(t *testing.T, h host.Host) {
 // this is because it used to be concurrent. Now, Dial wait till the
 // id service is done.
 func TestIDService(t *testing.T) {
-	for _, withObsAddrManager := range []bool{false, true} {
-		t.Run(fmt.Sprintf("withObsAddrManager=%t", withObsAddrManager), func(t *testing.T) {
-			if race.WithRace() {
-				t.Skip("This test modifies peerstore.RecentlyConnectedAddrTTL, which is racy.")
-			}
-			// This test is highly timing dependent, waiting on timeouts/expiration.
-			oldTTL := peerstore.RecentlyConnectedAddrTTL
-			oldTempTTL := peerstore.TempAddrTTL
-			peerstore.RecentlyConnectedAddrTTL = 500 * time.Millisecond
-			peerstore.TempAddrTTL = 50 * time.Millisecond
-			t.Cleanup(func() {
-				peerstore.RecentlyConnectedAddrTTL = oldTTL
-				peerstore.TempAddrTTL = oldTempTTL
-			})
+	if race.WithRace() {
+		t.Skip("This test modifies peerstore.RecentlyConnectedAddrTTL, which is racy.")
+	}
+	// This test is highly timing dependent, waiting on timeouts/expiration.
+	oldTTL := peerstore.RecentlyConnectedAddrTTL
+	oldTempTTL := peerstore.TempAddrTTL
+	peerstore.RecentlyConnectedAddrTTL = 500 * time.Millisecond
+	peerstore.TempAddrTTL = 50 * time.Millisecond
+	t.Cleanup(func() {
+		peerstore.RecentlyConnectedAddrTTL = oldTTL
+		peerstore.TempAddrTTL = oldTempTTL
+	})
 
-			clk := mockClock.NewMock()
-			swarm1 := swarmt.GenSwarm(t, swarmt.WithClock(clk))
-			swarm2 := swarmt.GenSwarm(t, swarmt.WithClock(clk))
-			h1 := blhost.NewBlankHost(swarm1)
-			h2 := blhost.NewBlankHost(swarm2)
+	clk := mockClock.NewMock()
+	swarm1 := swarmt.GenSwarm(t, swarmt.WithClock(clk))
+	swarm2 := swarmt.GenSwarm(t, swarmt.WithClock(clk))
+	h1 := blhost.NewBlankHost(swarm1)
+	h2 := blhost.NewBlankHost(swarm2)
 
-			h1p := h1.ID()
-			h2p := h2.ID()
+	h1p := h1.ID()
+	h2p := h2.ID()
 
-			opts := []identify.Option{}
-			if !withObsAddrManager {
-				opts = append(opts, identify.DisableObservedAddrManager())
-			}
-			ids1, err := identify.NewIDService(h1, opts...)
-			require.NoError(t, err)
-			defer ids1.Close()
-			ids1.Start()
+	ids1, err := identify.NewIDService(h1)
+	require.NoError(t, err)
+	defer ids1.Close()
+	ids1.Start()
 
-			opts = []identify.Option{}
-			if !withObsAddrManager {
-				opts = append(opts, identify.DisableObservedAddrManager())
-			}
-			ids2, err := identify.NewIDService(h2, opts...)
-			require.NoError(t, err)
-			defer ids2.Close()
-			ids2.Start()
+	ids2, err := identify.NewIDService(h2)
+	require.NoError(t, err)
+	defer ids2.Close()
+	ids2.Start()
 
-			sub, err := ids1.Host.EventBus().Subscribe(new(event.EvtPeerIdentificationCompleted))
-			if err != nil {
-				t.Fatal(err)
-			}
+	sub, err := ids1.Host.EventBus().Subscribe(new(event.EvtPeerIdentificationCompleted))
+	if err != nil {
+		t.Fatal(err)
+	}
 
-			testKnowsAddrs(t, h1, h2p, []ma.Multiaddr{}) // nothing
-			testKnowsAddrs(t, h2, h1p, []ma.Multiaddr{}) // nothing
+	testKnowsAddrs(t, h1, h2p, []ma.Multiaddr{}) // nothing
+	testKnowsAddrs(t, h2, h1p, []ma.Multiaddr{}) // nothing
 
-			// the forgetMe addr represents an address for h1 that h2 has learned out of band
-			// (not via identify protocol). During the identify exchange, it will be
-			// forgotten and replaced by the addrs h1 sends.
-			forgetMe, _ := ma.NewMultiaddr("/ip4/1.2.3.4/tcp/1234")
+	// the forgetMe addr represents an address for h1 that h2 has learned out of band
+	// (not via identify protocol). During the identify exchange, it will be
+	// forgotten and replaced by the addrs h1 sends.
+	forgetMe, _ := ma.NewMultiaddr("/ip4/1.2.3.4/tcp/1234")
 
-			h2.Peerstore().AddAddr(h1p, forgetMe, peerstore.RecentlyConnectedAddrTTL)
-			h2pi := h2.Peerstore().PeerInfo(h2p)
-			require.NoError(t, h1.Connect(context.Background(), h2pi))
+	h2.Peerstore().AddAddr(h1p, forgetMe, peerstore.RecentlyConnectedAddrTTL)
+	h2pi := h2.Peerstore().PeerInfo(h2p)
+	require.NoError(t, h1.Connect(context.Background(), h2pi))
 
-			h1t2c := h1.Network().ConnsToPeer(h2p)
-			require.NotEmpty(t, h1t2c, "should have a conn here")
+	h1t2c := h1.Network().ConnsToPeer(h2p)
+	require.NotEmpty(t, h1t2c, "should have a conn here")
 
-			ids1.IdentifyConn(h1t2c[0])
+	ids1.IdentifyConn(h1t2c[0])
 
-			// the idService should be opened automatically, by the network.
-			// what we should see now is that both peers know about each others listen addresses.
-			t.Log("test peer1 has peer2 addrs correctly")
-			testKnowsAddrs(t, h1, h2p, h2.Addrs()) // has them
-			testHasAgentVersion(t, h1, h2p)
-			testHasPublicKey(t, h1, h2p, h2.Peerstore().PubKey(h2p)) // h1 should have h2's public key
+	// the idService should be opened automatically, by the network.
+	// what we should see now is that both peers know about each others listen addresses.
+	t.Log("test peer1 has peer2 addrs correctly")
+	testKnowsAddrs(t, h1, h2p, h2.Addrs()) // has them
+	testHasAgentVersion(t, h1, h2p)
+	testHasPublicKey(t, h1, h2p, h2.Peerstore().PubKey(h2p)) // h1 should have h2's public key
 
-			// now, this wait we do have to do. it's the wait for the Listening side
-			// to be done identifying the connection.
-			c := h2.Network().ConnsToPeer(h1.ID())
-			require.NotEmpty(t, c, "should have connection by now at least.")
-			ids2.IdentifyConn(c[0])
+	// now, this wait we do have to do. it's the wait for the Listening side
+	// to be done identifying the connection.
+	c := h2.Network().ConnsToPeer(h1.ID())
+	require.NotEmpty(t, c, "should have connection by now at least.")
+	ids2.IdentifyConn(c[0])
 
-			// and the protocol versions.
-			t.Log("test peer2 has peer1 addrs correctly")
-			testKnowsAddrs(t, h2, h1p, h1.Addrs()) // has them
-			testHasAgentVersion(t, h2, h1p)
-			testHasPublicKey(t, h2, h1p, h1.Peerstore().PubKey(h1p)) // h1 should have h2's public key
+	// and the protocol versions.
+	t.Log("test peer2 has peer1 addrs correctly")
+	testKnowsAddrs(t, h2, h1p, h1.Addrs()) // has them
+	testHasAgentVersion(t, h2, h1p)
+	testHasPublicKey(t, h2, h1p, h1.Peerstore().PubKey(h1p)) // h1 should have h2's public key
 
-			// Need both sides to actually notice that the connection has been closed.
-			sentDisconnect1 := waitForDisconnectNotification(swarm1)
-			sentDisconnect2 := waitForDisconnectNotification(swarm2)
-			h1.Network().ClosePeer(h2p)
-			h2.Network().ClosePeer(h1p)
-			if len(h2.Network().ConnsToPeer(h1.ID())) != 0 || len(h1.Network().ConnsToPeer(h2.ID())) != 0 {
-				t.Fatal("should have no connections")
-			}
+	// Need both sides to actually notice that the connection has been closed.
+	sentDisconnect1 := waitForDisconnectNotification(swarm1)
+	sentDisconnect2 := waitForDisconnectNotification(swarm2)
+	h1.Network().ClosePeer(h2p)
+	h2.Network().ClosePeer(h1p)
+	if len(h2.Network().ConnsToPeer(h1.ID())) != 0 || len(h1.Network().ConnsToPeer(h2.ID())) != 0 {
+		t.Fatal("should have no connections")
+	}
 
-			t.Log("testing addrs just after disconnect")
-			// addresses don't immediately expire on disconnect, so we should still have them
-			testKnowsAddrs(t, h2, h1p, h1.Addrs())
-			testKnowsAddrs(t, h1, h2p, h2.Addrs())
+	t.Log("testing addrs just after disconnect")
+	// addresses don't immediately expire on disconnect, so we should still have them
+	testKnowsAddrs(t, h2, h1p, h1.Addrs())
+	testKnowsAddrs(t, h1, h2p, h2.Addrs())
 
-			<-sentDisconnect1
-			<-sentDisconnect2
+	<-sentDisconnect1
+	<-sentDisconnect2
 
-			// the addrs had their TTLs reduced on disconnect, and
-			// will be forgotten soon after
-			t.Log("testing addrs after TTL expiration")
-			clk.Add(time.Second)
-			testKnowsAddrs(t, h1, h2p, []ma.Multiaddr{})
-			testKnowsAddrs(t, h2, h1p, []ma.Multiaddr{})
+	// the addrs had their TTLs reduced on disconnect, and
+	// will be forgotten soon after
+	t.Log("testing addrs after TTL expiration")
+	clk.Add(time.Second)
+	testKnowsAddrs(t, h1, h2p, []ma.Multiaddr{})
+	testKnowsAddrs(t, h2, h1p, []ma.Multiaddr{})
 
-			// test that we received the "identify completed" event.
-			select {
-			case evtAny := <-sub.Out():
-				assertCorrectEvtPeerIdentificationCompleted(t, evtAny, h2)
-			case <-time.After(3 * time.Second):
-				t.Fatalf("expected EvtPeerIdentificationCompleted event within 10 seconds; none received")
-			}
-		})
+	// test that we received the "identify completed" event.
+	select {
+	case evtAny := <-sub.Out():
+		assertCorrectEvtPeerIdentificationCompleted(t, evtAny, h2)
+	case <-time.After(3 * time.Second):
+		t.Fatalf("expected EvtPeerIdentificationCompleted event within 10 seconds; none received")
 	}
 }
 
@@ -489,7 +472,7 @@ func TestIdentifyPushOnAddrChange(t *testing.T) {
 	testKnowsAddrs(t, h2, h1p, h1.Peerstore().Addrs(h1p))
 
 	// change addr on host 1 and ensure host2 gets a push
-	lad := tStringCast("/ip4/127.0.0.1/tcp/1234")
+	lad, _ := ma.StringCast("/ip4/127.0.0.1/tcp/1234")
 	require.NoError(t, h1.Network().Listen(lad))
 	matest.AssertMultiaddrsContain(t, h1.Addrs(), lad)
 
@@ -503,7 +486,7 @@ func TestIdentifyPushOnAddrChange(t *testing.T) {
 	require.True(t, ma.Contains(h2.Peerstore().Addrs(h1p), lad))
 
 	// change addr on host2 and ensure host 1 gets a pus
-	lad = tStringCast("/ip4/127.0.0.1/tcp/1235")
+	lad, _ = ma.StringCast("/ip4/127.0.0.1/tcp/1235")
 	require.NoError(t, h2.Network().Listen(lad))
 	matest.AssertMultiaddrsContain(t, h2.Addrs(), lad)
 	h1AddrStream := h1.Peerstore().AddrStream(ctx, h2p)
@@ -515,7 +498,7 @@ func TestIdentifyPushOnAddrChange(t *testing.T) {
 	require.True(t, ma.Contains(h1.Peerstore().Addrs(h2p), lad))
 
 	// change addr on host2 again
-	lad2 := tStringCast("/ip4/127.0.0.1/tcp/1236")
+	lad2, _ := ma.StringCast("/ip4/127.0.0.1/tcp/1236")
 	require.NoError(t, h2.Network().Listen(lad2))
 	matest.AssertMultiaddrsContain(t, h2.Addrs(), lad2)
 	emitAddrChangeEvt(t, h2)
@@ -791,7 +774,7 @@ func TestLargePushMessage(t *testing.T) {
 	testKnowsAddrs(t, h2, h1p, h1.Peerstore().Addrs(h1p))
 
 	// change addr on host 1 and ensure host2 gets a push
-	lad := tStringCast("/ip4/127.0.0.1/tcp/1234")
+	lad, _ := ma.StringCast("/ip4/127.0.0.1/tcp/1234")
 	require.NoError(t, h1.Network().Listen(lad))
 	matest.AssertMultiaddrsContain(t, h1.Addrs(), lad)
 	emitAddrChangeEvt(t, h1)
@@ -801,7 +784,7 @@ func TestLargePushMessage(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 
 	// change addr on host2 and ensure host 1 gets a pus
-	lad = tStringCast("/ip4/127.0.0.1/tcp/1235")
+	lad, _ = ma.StringCast("/ip4/127.0.0.1/tcp/1235")
 	require.NoError(t, h2.Network().Listen(lad))
 	matest.AssertMultiaddrsContain(t, h2.Addrs(), lad)
 	emitAddrChangeEvt(t, h2)
@@ -811,7 +794,7 @@ func TestLargePushMessage(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 
 	// change addr on host2 again
-	lad2 := tStringCast("/ip4/127.0.0.1/tcp/1236")
+	lad2, _ := ma.StringCast("/ip4/127.0.0.1/tcp/1236")
 	require.NoError(t, h2.Network().Listen(lad2))
 	matest.AssertMultiaddrsContain(t, h2.Addrs(), lad2)
 	emitAddrChangeEvt(t, h2)
@@ -842,7 +825,7 @@ func TestIdentifyResponseReadTimeout(t *testing.T) {
 	ids2.Start()
 
 	// remote stream handler will just hang and not send back an identify response
-	h2.SetStreamHandler(identify.ID, func(s network.Stream) {
+	h2.SetStreamHandler(identify.ID, func(_ network.Stream) {
 		time.Sleep(100 * time.Second)
 	})
 
@@ -906,7 +889,8 @@ func TestOutOfOrderConnectedNotifs(t *testing.T) {
 	h1, err := libp2p.New(libp2p.NoListenAddrs)
 	require.NoError(t, err)
 	defer h1.Close()
-	h2, err := libp2p.New(libp2p.ListenAddrs(tStringCast("/ip4/127.0.0.1/udp/0/quic-v1")))
+	ha, _ := ma.StringCast("/ip4/127.0.0.1/udp/0/quic-v1")
+	h2, err := libp2p.New(libp2p.ListenAddrs(ha))
 	require.NoError(t, err)
 	defer h2.Close()
 
@@ -915,7 +899,7 @@ func TestOutOfOrderConnectedNotifs(t *testing.T) {
 
 	// This callback may be called before identify's Connnected callback completes. If it does, the IdentifyWait should still finish successfully.
 	h1.Network().Notify(&network.NotifyBundle{
-		ConnectedF: func(n network.Network, c network.Conn) {
+		ConnectedF: func(_ network.Network, c network.Conn) {
 			idChan := h1.(interface{ IDService() identify.IDService }).IDService().IdentifyWait(c)
 			go func() {
 				<-idChan
@@ -963,7 +947,7 @@ func waitForDisconnectNotification(swarm *swarm.Swarm) <-chan struct{} {
 	var once sync.Once
 	var nb *network.NotifyBundle
 	nb = &network.NotifyBundle{
-		DisconnectedF: func(n network.Network, c network.Conn) {
+		DisconnectedF: func(_ network.Network, _ network.Conn) {
 			once.Do(func() {
 				go func() {
 					swarm.StopNotify(nb)

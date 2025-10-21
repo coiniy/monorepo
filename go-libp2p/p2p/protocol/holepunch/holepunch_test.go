@@ -15,13 +15,13 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
-	"github.com/libp2p/go-libp2p/p2p/net/simconn"
 	relayv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
 	holepunch_pb "github.com/libp2p/go-libp2p/p2p/protocol/holepunch/pb"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/libp2p/go-libp2p/p2p/transport/quicreuse"
+	"github.com/marcopolo/simnet"
 	"go.uber.org/fx"
 
 	"github.com/libp2p/go-msgio/pbio"
@@ -70,28 +70,18 @@ func (m mockMaddrFilter) FilterRemote(remoteID peer.ID, maddrs []ma.Multiaddr) [
 
 var _ holepunch.AddrFilter = &mockMaddrFilter{}
 
-type mockIDService struct {
-	identify.IDService
-}
-
-var _ identify.IDService = &mockIDService{}
-
-func newMockIDService(t *testing.T, h host.Host) identify.IDService {
+func newIDService(t *testing.T, h host.Host) identify.IDService {
 	ids, err := identify.NewIDService(h)
 	require.NoError(t, err)
 	ids.Start()
 	t.Cleanup(func() { ids.Close() })
-	return &mockIDService{IDService: ids}
-}
-
-func (s *mockIDService) OwnObservedAddrs() []ma.Multiaddr {
-	return append(s.IDService.OwnObservedAddrs(), tStringCast("/ip4/1.1.1.1/tcp/1234"))
+	return ids
 }
 
 func TestNoHolePunchIfDirectConnExists(t *testing.T) {
-	router := &simconn.SimpleFirewallRouter{}
+	router := &simnet.SimpleFirewallRouter{}
 	relay := MustNewHost(t,
-		quicSimConn(true, router),
+		quicSimnet(true, router),
 		libp2p.ListenAddrs(tStringCast("/ip4/1.2.0.1/udp/8000/quic-v1")),
 		libp2p.DisableRelay(),
 		libp2p.ResourceManager(&network.NullResourceManager{}),
@@ -104,14 +94,14 @@ func TestNoHolePunchIfDirectConnExists(t *testing.T) {
 
 	tr := &mockEventTracer{}
 	h1 := MustNewHost(t,
-		quicSimConn(false, router),
+		quicSimnet(false, router),
 		libp2p.EnableHolePunching(holepunch.DirectDialTimeout(100*time.Millisecond)),
 		libp2p.ListenAddrs(tStringCast("/ip4/2.2.0.1/udp/8000/quic-v1")),
 		libp2p.ResourceManager(&network.NullResourceManager{}),
 	)
 
 	h2 := MustNewHost(t,
-		quicSimConn(true, router),
+		quicSimnet(true, router),
 		libp2p.ListenAddrs(tStringCast("/ip4/2.2.0.2/udp/8001/quic-v1")),
 		libp2p.ResourceManager(&network.NullResourceManager{}),
 		libp2p.ForceReachabilityPublic(),
@@ -143,9 +133,9 @@ func TestNoHolePunchIfDirectConnExists(t *testing.T) {
 }
 
 func TestDirectDialWorks(t *testing.T) {
-	router := &simconn.SimpleFirewallRouter{}
+	router := &simnet.SimpleFirewallRouter{}
 	relay := MustNewHost(t,
-		quicSimConn(true, router),
+		quicSimnet(true, router),
 		libp2p.ListenAddrs(tStringCast("/ip4/1.2.0.1/udp/8000/quic-v1")),
 		libp2p.DisableRelay(),
 		libp2p.ResourceManager(&network.NullResourceManager{}),
@@ -159,7 +149,7 @@ func TestDirectDialWorks(t *testing.T) {
 	tr := &mockEventTracer{}
 	// h1 is public
 	h1 := MustNewHost(t,
-		quicSimConn(true, router),
+		quicSimnet(true, router),
 		libp2p.ForceReachabilityPublic(),
 		libp2p.EnableHolePunching(holepunch.DirectDialTimeout(100*time.Millisecond)),
 		libp2p.ListenAddrs(tStringCast("/ip4/2.2.0.1/udp/8000/quic-v1")),
@@ -167,7 +157,7 @@ func TestDirectDialWorks(t *testing.T) {
 	)
 
 	h2 := MustNewHost(t,
-		quicSimConn(false, router),
+		quicSimnet(false, router),
 		libp2p.ListenAddrs(tStringCast("/ip4/2.2.0.2/udp/8001/quic-v1")),
 		libp2p.ResourceManager(&network.NullResourceManager{}),
 		connectToRelay(&relay),
@@ -250,9 +240,9 @@ func TestEndToEndSimConnect(t *testing.T) {
 			h1tr := &mockEventTracer{}
 			h2tr := &mockEventTracer{}
 
-			router := &simconn.SimpleFirewallRouter{}
+			router := &simnet.SimpleFirewallRouter{}
 			relay := MustNewHost(t,
-				quicSimConn(true, router),
+				quicSimnet(true, router),
 				libp2p.ListenAddrs(tStringCast("/ip4/1.2.0.1/udp/8000/quic-v1")),
 				libp2p.DisableRelay(),
 				libp2p.ResourceManager(&network.NullResourceManager{}),
@@ -264,7 +254,7 @@ func TestEndToEndSimConnect(t *testing.T) {
 			)
 
 			h1 := MustNewHost(t,
-				quicSimConn(false, router),
+				quicSimnet(false, router),
 				libp2p.EnableHolePunching(holepunch.WithTracer(h1tr), holepunch.DirectDialTimeout(100*time.Millisecond), SetLegacyBehavior(useLegacyHolePunchingBehavior)),
 				libp2p.ListenAddrs(tStringCast("/ip4/2.2.0.1/udp/8000/quic-v1")),
 				libp2p.ResourceManager(&network.NullResourceManager{}),
@@ -272,7 +262,7 @@ func TestEndToEndSimConnect(t *testing.T) {
 			)
 
 			h2 := MustNewHost(t,
-				quicSimConn(false, router),
+				quicSimnet(false, router),
 				libp2p.ListenAddrs(tStringCast("/ip4/2.2.0.2/udp/8001/quic-v1")),
 				libp2p.ResourceManager(&network.NullResourceManager{}),
 				connectToRelay(&relay),
@@ -350,13 +340,13 @@ func TestFailuresOnInitiator(t *testing.T) {
 		},
 		"responder does NOT reply within hole punch deadline": {
 			holePunchTimeout: 200 * time.Millisecond,
-			rhandler:         func(s network.Stream) { time.Sleep(5 * time.Second) },
+			rhandler:         func(_ network.Stream) { time.Sleep(5 * time.Second) },
 			errMsg:           "i/o deadline reached",
 		},
 		"no addrs after filtering": {
 			errMsg:   "aborting hole punch initiation as we have no public address",
-			rhandler: func(s network.Stream) { time.Sleep(5 * time.Second) },
-			filter: func(remoteID peer.ID, maddrs []ma.Multiaddr) []ma.Multiaddr {
+			rhandler: func(_ network.Stream) { time.Sleep(5 * time.Second) },
+			filter: func(_ peer.ID, _ []ma.Multiaddr) []ma.Multiaddr {
 				return []ma.Multiaddr{}
 			},
 		},
@@ -370,9 +360,9 @@ func TestFailuresOnInitiator(t *testing.T) {
 				defer func() { holepunch.StreamTimeout = cpy }()
 			}
 
-			router := &simconn.SimpleFirewallRouter{}
+			router := &simnet.SimpleFirewallRouter{}
 			relay := MustNewHost(t,
-				quicSimConn(true, router),
+				quicSimnet(true, router),
 				libp2p.ListenAddrs(tStringCast("/ip4/1.2.0.1/udp/8000/quic-v1")),
 				libp2p.DisableRelay(),
 				libp2p.ResourceManager(&network.NullResourceManager{}),
@@ -385,7 +375,7 @@ func TestFailuresOnInitiator(t *testing.T) {
 
 			// h1 does not have a holepunching service because we'll mock the holepunching stream handler below.
 			h1 := MustNewHost(t,
-				quicSimConn(false, router),
+				quicSimnet(false, router),
 				libp2p.ForceReachabilityPrivate(),
 				libp2p.ListenAddrs(tStringCast("/ip4/2.2.0.1/udp/8000/quic-v1")),
 				libp2p.ResourceManager(&network.NullResourceManager{}),
@@ -393,7 +383,7 @@ func TestFailuresOnInitiator(t *testing.T) {
 			)
 
 			h2 := MustNewHost(t,
-				quicSimConn(false, router),
+				quicSimnet(false, router),
 				libp2p.ListenAddrs(tStringCast("/ip4/2.2.0.2/udp/8001/quic-v1")),
 				libp2p.ResourceManager(&network.NullResourceManager{}),
 				connectToRelay(&relay),
@@ -496,7 +486,7 @@ func TestFailuresOnResponder(t *testing.T) {
 				})
 				time.Sleep(10 * time.Second)
 			},
-			filter: func(remoteID peer.ID, maddrs []ma.Multiaddr) []ma.Multiaddr {
+			filter: func(_ peer.ID, _ []ma.Multiaddr) []ma.Multiaddr {
 				return []ma.Multiaddr{}
 			},
 		},
@@ -520,9 +510,9 @@ func TestFailuresOnResponder(t *testing.T) {
 				opts = append(opts, holepunch.WithAddrFilter(f))
 			}
 
-			router := &simconn.SimpleFirewallRouter{}
+			router := &simnet.SimpleFirewallRouter{}
 			relay := MustNewHost(t,
-				quicSimConn(true, router),
+				quicSimnet(true, router),
 				libp2p.ListenAddrs(tStringCast("/ip4/1.2.0.1/udp/8000/quic-v1")),
 				libp2p.DisableRelay(),
 				libp2p.ResourceManager(&network.NullResourceManager{}),
@@ -533,7 +523,7 @@ func TestFailuresOnResponder(t *testing.T) {
 				})),
 			)
 			h1 := MustNewHost(t,
-				quicSimConn(false, router),
+				quicSimnet(false, router),
 				libp2p.EnableHolePunching(opts...),
 				libp2p.ListenAddrs(tStringCast("/ip4/2.2.0.1/udp/8000/quic-v1")),
 				libp2p.ResourceManager(&network.NullResourceManager{}),
@@ -542,7 +532,7 @@ func TestFailuresOnResponder(t *testing.T) {
 			)
 
 			h2 := MustNewHost(t,
-				quicSimConn(false, router),
+				quicSimnet(false, router),
 				libp2p.ListenAddrs(tStringCast("/ip4/2.2.0.2/udp/8001/quic-v1")),
 				libp2p.ResourceManager(&network.NullResourceManager{}),
 				connectToRelay(&relay),
@@ -635,32 +625,30 @@ type MockSourceIPSelector struct {
 	ip atomic.Pointer[net.IP]
 }
 
-func (m *MockSourceIPSelector) PreferredSourceIPForDestination(dst *net.UDPAddr) (net.IP, error) {
+func (m *MockSourceIPSelector) PreferredSourceIPForDestination(_ *net.UDPAddr) (net.IP, error) {
 	return *m.ip.Load(), nil
 }
 
-func quicSimConn(isPubliclyReachably bool, router *simconn.SimpleFirewallRouter) libp2p.Option {
+func quicSimnet(isPubliclyReachably bool, router *simnet.SimpleFirewallRouter) libp2p.Option {
 	m := &MockSourceIPSelector{}
 	return libp2p.QUICReuse(
 		quicreuse.NewConnManager,
 		quicreuse.OverrideSourceIPSelector(func() (quicreuse.SourceIPSelector, error) {
 			return m, nil
 		}),
-		quicreuse.OverrideListenUDP(func(network string, address *net.UDPAddr) (net.PacketConn, error) {
+		quicreuse.OverrideListenUDP(func(_ string, address *net.UDPAddr) (net.PacketConn, error) {
 			m.ip.Store(&address.IP)
-			c := simconn.NewSimConn(address, router)
 			if isPubliclyReachably {
-				router.AddPubliclyReachableNode(address, c)
-			} else {
-				router.AddNode(address, c)
+				router.SetAddrPubliclyReachable(address)
 			}
+			c := simnet.NewSimConn(address, router)
 			return c, nil
 		}))
 }
 
 func addHolePunchService(t *testing.T, h host.Host, extraAddrs []ma.Multiaddr, opts ...holepunch.Option) *holepunch.Service {
 	t.Helper()
-	hps, err := holepunch.NewService(h, newMockIDService(t, h), func() []ma.Multiaddr {
+	hps, err := holepunch.NewService(h, newIDService(t, h), func() []ma.Multiaddr {
 		addrs := h.Addrs()
 		addrs = append(addrs, extraAddrs...)
 		return addrs
@@ -700,9 +688,9 @@ func TestEndToEndSimConnectQUICReuse(t *testing.T) {
 	h1tr := &mockEventTracer{}
 	h2tr := &mockEventTracer{}
 
-	router := &simconn.SimpleFirewallRouter{}
+	router := &simnet.SimpleFirewallRouter{}
 	relay := MustNewHost(t,
-		quicSimConn(true, router),
+		quicSimnet(true, router),
 		libp2p.ListenAddrs(tStringCast("/ip4/1.2.0.1/udp/8000/quic-v1")),
 		libp2p.DisableRelay(),
 		libp2p.ResourceManager(&network.NullResourceManager{}),
@@ -737,7 +725,7 @@ func TestEndToEndSimConnectQUICReuse(t *testing.T) {
 	}
 
 	h1 := MustNewHost(t,
-		quicSimConn(false, router),
+		quicSimnet(false, router),
 		libp2p.EnableHolePunching(holepunch.WithTracer(h1tr), holepunch.DirectDialTimeout(100*time.Millisecond)),
 		libp2p.ListenAddrs(tStringCast("/ip4/2.2.0.1/udp/8001/quic-v1/webtransport")),
 		libp2p.ResourceManager(&network.NullResourceManager{}),
@@ -753,7 +741,7 @@ func TestEndToEndSimConnectQUICReuse(t *testing.T) {
 	)
 
 	h2 := MustNewHost(t,
-		quicSimConn(false, router),
+		quicSimnet(false, router),
 		libp2p.ListenAddrs(
 			tStringCast("/ip4/2.2.0.2/udp/8001/quic-v1/webtransport"),
 		),

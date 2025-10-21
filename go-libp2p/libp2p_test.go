@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/netip"
@@ -55,7 +56,7 @@ func TestNewHost(t *testing.T) {
 
 func TestTransportConstructor(t *testing.T) {
 	ctor := func(
-		h host.Host,
+		_ host.Host,
 		_ connmgr.ConnectionGater,
 		upgrader transport.Upgrader,
 	) transport.Transport {
@@ -156,7 +157,7 @@ func TestChainOptions(t *testing.T) {
 	newOpt := func() Option {
 		index := optcount
 		optcount++
-		return func(c *Config) error {
+		return func(_ *Config) error {
 			optsRun = append(optsRun, index)
 			return nil
 		}
@@ -437,9 +438,10 @@ func TestMain(m *testing.M) {
 		// This will return eventually (5s timeout) but doesn't take a context.
 		goleak.IgnoreAnyFunction("github.com/koron/go-ssdp.Search"),
 		goleak.IgnoreAnyFunction("github.com/pion/sctp.(*Stream).SetReadDeadline.func1"),
-		// Logging & Stats
-		goleak.IgnoreTopFunction("github.com/ipfs/go-log/v2/writer.(*MirrorWriter).logRoutine"),
+		// Stats
+
 		goleak.IgnoreTopFunction("go.opencensus.io/stats/view.(*worker).start"),
+		// nat-pmp
 		goleak.IgnoreAnyFunction("github.com/jackpal/go-nat-pmp.(*Client).GetExternalAddress"),
 	)
 }
@@ -603,73 +605,72 @@ func TestWebRTCReuseAddrWithQUIC(t *testing.T) {
 	})
 }
 
-// Re-enable when figured out
-// func TestUseCorrectTransportForDialOut(t *testing.T) {
-// 	listAddrOrder := [][]string{
-// 		{"/ip4/127.0.0.1/udp/0/quic-v1", "/ip4/127.0.0.1/udp/0/quic-v1/webtransport"},
-// 		{"/ip4/127.0.0.1/udp/0/quic-v1/webtransport", "/ip4/127.0.0.1/udp/0/quic-v1"},
-// 		{"/ip4/0.0.0.0/udp/0/quic-v1", "/ip4/0.0.0.0/udp/0/quic-v1/webtransport"},
-// 		{"/ip4/0.0.0.0/udp/0/quic-v1/webtransport", "/ip4/0.0.0.0/udp/0/quic-v1"},
-// 	}
-// 	for _, order := range listAddrOrder {
-// 		h1, err := New(ListenAddrStrings(order...), Transport(quic.NewTransport), Transport(webtransport.New))
-// 		require.NoError(t, err)
-// 		t.Cleanup(func() {
-// 			h1.Close()
-// 		})
+func TestUseCorrectTransportForDialOut(t *testing.T) {
+	listAddrOrder := [][]string{
+		{"/ip4/127.0.0.1/udp/0/quic-v1", "/ip4/127.0.0.1/udp/0/quic-v1/webtransport"},
+		{"/ip4/127.0.0.1/udp/0/quic-v1/webtransport", "/ip4/127.0.0.1/udp/0/quic-v1"},
+		{"/ip4/0.0.0.0/udp/0/quic-v1", "/ip4/0.0.0.0/udp/0/quic-v1/webtransport"},
+		{"/ip4/0.0.0.0/udp/0/quic-v1/webtransport", "/ip4/0.0.0.0/udp/0/quic-v1"},
+	}
+	for _, order := range listAddrOrder {
+		h1, err := New(ListenAddrStrings(order...), Transport(quic.NewTransport), Transport(webtransport.New))
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			h1.Close()
+		})
 
-// 		go func() {
-// 			h1.SetStreamHandler("/echo-port", func(s network.Stream) {
-// 				m := s.Conn().RemoteMultiaddr()
-// 				v, err := m.ValueForProtocol(ma.P_UDP)
-// 				if err != nil {
-// 					s.Reset()
-// 					return
-// 				}
-// 				s.Write([]byte(v))
-// 				s.Close()
-// 			})
-// 		}()
+		go func() {
+			h1.SetStreamHandler("/echo-port", func(s network.Stream) {
+				m := s.Conn().RemoteMultiaddr()
+				v, err := m.ValueForProtocol(ma.P_UDP)
+				if err != nil {
+					s.Reset()
+					return
+				}
+				s.Write([]byte(v))
+				s.Close()
+			})
+		}()
 
-// 		for _, addr := range h1.Addrs() {
-// 			t.Run("order "+strings.Join(order, ",")+" Dial to "+addr.String(), func(t *testing.T) {
-// 				h2, err := New(ListenAddrStrings(
-// 					"/ip4/0.0.0.0/udp/0/quic-v1",
-// 					"/ip4/0.0.0.0/udp/0/quic-v1/webtransport",
-// 				), Transport(quic.NewTransport), Transport(webtransport.New))
-// 				require.NoError(t, err)
-// 				defer h2.Close()
-// 				t.Log("H2 Addrs", h2.Addrs())
-// 				var myExpectedDialOutAddr ma.Multiaddr
-// 				addrIsWT, _ := webtransport.IsWebtransportMultiaddr(addr)
-// 				isLocal := func(a ma.Multiaddr) bool {
-// 					return strings.Contains(a.String(), "127.0.0.1")
-// 				}
-// 				addrIsLocal := isLocal(addr)
-// 				for _, a := range h2.Addrs() {
-// 					aIsWT, _ := webtransport.IsWebtransportMultiaddr(a)
-// 					if addrIsWT == aIsWT && isLocal(a) == addrIsLocal {
-// 						myExpectedDialOutAddr = a
-// 						break
-// 					}
-// 				}
+		for _, addr := range h1.Addrs() {
+			t.Run("order "+strings.Join(order, ",")+" Dial to "+addr.String(), func(t *testing.T) {
+				h2, err := New(ListenAddrStrings(
+					"/ip4/0.0.0.0/udp/0/quic-v1",
+					"/ip4/0.0.0.0/udp/0/quic-v1/webtransport",
+				), Transport(quic.NewTransport), Transport(webtransport.New))
+				require.NoError(t, err)
+				defer h2.Close()
+				t.Log("H2 Addrs", h2.Addrs())
+				var myExpectedDialOutAddr ma.Multiaddr
+				addrIsWT, _ := webtransport.IsWebtransportMultiaddr(addr)
+				isLocal := func(a ma.Multiaddr) bool {
+					return strings.Contains(a.String(), "127.0.0.1")
+				}
+				addrIsLocal := isLocal(addr)
+				for _, a := range h2.Addrs() {
+					aIsWT, _ := webtransport.IsWebtransportMultiaddr(a)
+					if addrIsWT == aIsWT && isLocal(a) == addrIsLocal {
+						myExpectedDialOutAddr = a
+						break
+					}
+				}
 
-// 				err = h2.Connect(context.Background(), peer.AddrInfo{ID: h1.ID(), Addrs: []ma.Multiaddr{addr}})
-// 				require.NoError(t, err)
+				err = h2.Connect(context.Background(), peer.AddrInfo{ID: h1.ID(), Addrs: []ma.Multiaddr{addr}})
+				require.NoError(t, err)
 
-// 				s, err := h2.NewStream(context.Background(), h1.ID(), "/echo-port")
-// 				require.NoError(t, err)
+				s, err := h2.NewStream(context.Background(), h1.ID(), "/echo-port")
+				require.NoError(t, err)
 
-// 				port, err := io.ReadAll(s)
-// 				require.NoError(t, err)
+				port, err := io.ReadAll(s)
+				require.NoError(t, err)
 
-// 				myExpectedPort, err := myExpectedDialOutAddr.ValueForProtocol(ma.P_UDP)
-// 				require.NoError(t, err)
-// 				require.Equal(t, myExpectedPort, string(port))
-// 			})
-// 		}
-// 	}
-// }
+				myExpectedPort, err := myExpectedDialOutAddr.ValueForProtocol(ma.P_UDP)
+				require.NoError(t, err)
+				require.Equal(t, myExpectedPort, string(port))
+			})
+		}
+	}
+}
 
 func TestCircuitBehindWSS(t *testing.T) {
 	relayTLSConf := getTLSConf(t, net.IPv4(127, 0, 0, 1), time.Now(), time.Now().Add(time.Hour))
@@ -796,7 +797,7 @@ func TestSharedTCPAddr(t *testing.T) {
 
 func TestCustomTCPDialer(t *testing.T) {
 	expectedErr := errors.New("custom dialer called, but not implemented")
-	customDialer := func(raddr ma.Multiaddr) (tcp.ContextDialer, error) {
+	customDialer := func(_ ma.Multiaddr) (tcp.ContextDialer, error) {
 		// Normally a user would implement this by returning a custom dialer
 		// Here, we just test that this is called.
 		return nil, expectedErr
@@ -820,6 +821,23 @@ func TestCustomTCPDialer(t *testing.T) {
 		Addrs: []ma.Multiaddr{a},
 	})
 	require.ErrorContains(t, err, expectedErr.Error())
+}
+
+func TestBasicHostInterfaceAssertion(t *testing.T) {
+	mockRouter := &mockPeerRouting{}
+	h, err := New(
+		NoListenAddrs,
+		Routing(func(host.Host) (routing.PeerRouting, error) { return mockRouter, nil }),
+		DisableRelay(),
+	)
+	require.NoError(t, err)
+	defer h.Close()
+
+	require.NotNil(t, h)
+	require.NotEmpty(t, h.ID())
+
+	_, ok := h.(interface{ AllAddrs() []ma.Multiaddr })
+	require.True(t, ok)
 }
 
 func BenchmarkAllAddrs(b *testing.B) {

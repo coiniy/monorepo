@@ -2,12 +2,13 @@ package canonicallog
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
+	"os"
 	"testing"
 
 	"github.com/libp2p/go-libp2p/core/test"
 
-	logging "github.com/ipfs/go-log/v2"
 	ma "github.com/multiformats/go-multiaddr"
 )
 
@@ -17,10 +18,12 @@ func tStringCast(s string) ma.Multiaddr {
 }
 
 func TestLogs(t *testing.T) {
-	err := logging.SetLogLevel("canonical-log", "info")
-	if err != nil {
-		t.Fatal(err)
-	}
+	originalLogger := log
+	defer func() {
+		log = originalLogger
+	}()
+	// Override to print debug logs
+	log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo, AddSource: true}))
 
 	LogMisbehavingPeer(test.RandPeerIDFatal(t), tStringCast("/ip4/1.2.3.4"), "somecomponent", fmt.Errorf("something"), "hi")
 

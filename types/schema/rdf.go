@@ -126,6 +126,16 @@ func (t *TurtleRDFParser) GetTags(document string) (map[string]*RDFTag, error) {
 			parts = strings.Split(className, "/")
 			className = parts[len(parts)-1]
 			classUrl := subj[:len(subj)-len(className)]
+
+			// Add prefix to className
+			// Try with trailing slash first (common case)
+			if prefix, ok := prefixMap[classUrl]; ok {
+				className = prefix + className
+			} else if prefix, ok := prefixMap[classUrl+"/"]; ok {
+				// Try adding slash if not found
+				className = prefix + className
+			}
+
 			classes = append(classes, className)
 			classUrls = append(classUrls, classUrl)
 			classTerms = append(classTerms, a.Subject)
@@ -405,6 +415,15 @@ func (t *TurtleRDFParser) GetTagsByClass(document string) (
 			parts = strings.Split(className, "/")
 			className = parts[len(parts)-1]
 			classUrl := subj[:len(subj)-len(className)]
+			// Add prefix to className
+			// Try with trailing slash first (common case)
+			if prefix, ok := prefixMap[classUrl]; ok {
+				className = prefix + className
+			} else if prefix, ok := prefixMap[classUrl+"/"]; ok {
+				// Try adding slash if not found
+				className = prefix + className
+			}
+
 			classes = append(classes, className)
 			classUrls = append(classUrls, classUrl)
 			classTerms = append(classTerms, a.Subject)
@@ -683,6 +702,16 @@ func (t *TurtleRDFParser) GenerateQCL(document string) (string, error) {
 			parts = strings.Split(className, "/")
 			className = parts[len(parts)-1]
 			classUrl := subj[:len(subj)-len(className)]
+
+			// Add prefix to className
+			// Try with trailing slash first (common case)
+			if prefix, ok := prefixMap[classUrl]; ok {
+				className = prefix + className
+			} else if prefix, ok := prefixMap[classUrl+"/"]; ok {
+				// Try adding slash if not found
+				className = prefix + className
+			}
+
 			classes = append(classes, className)
 			classUrls = append(classUrls, classUrl)
 			classTerms = append(classTerms, a.Subject)
@@ -856,7 +885,12 @@ func (t *TurtleRDFParser) GenerateQCL(document string) (string, error) {
 	})
 
 	for _, class := range classes {
-		output += fmt.Sprintf("type %s struct {\n", class)
+		// Strip prefix for Go struct name
+		structName := class
+		if colonIdx := strings.Index(class, ":"); colonIdx != -1 {
+			structName = class[colonIdx+1:]
+		}
+		output += fmt.Sprintf("type %s struct {\n", structName)
 
 		sortedFields := []*Field{}
 		for _, field := range fields[class] {
@@ -903,16 +937,22 @@ func (t *TurtleRDFParser) GenerateQCL(document string) (string, error) {
 	}
 
 	for _, class := range classes {
+		// Strip prefix for Go struct name
+		structName := class
+		if colonIdx := strings.Index(class, ":"); colonIdx != -1 {
+			structName = class[colonIdx+1:]
+		}
+
 		totalSize := uint32(0)
 		for _, field := range fields[class] {
 			totalSize += field.Size
 		}
 		output += fmt.Sprintf(
 			"func Unmarshal%s(payload [%d]byte) %s {\n  result := %s{}\n",
-			class,
+			structName,
 			totalSize,
-			class,
-			class,
+			structName,
+			structName,
 		)
 		s := uint32(0)
 		sortedFields := []*Field{}
@@ -976,14 +1016,20 @@ func (t *TurtleRDFParser) GenerateQCL(document string) (string, error) {
 	}
 
 	for _, class := range classes {
+		// Strip prefix for Go struct name
+		structName := class
+		if colonIdx := strings.Index(class, ":"); colonIdx != -1 {
+			structName = class[colonIdx+1:]
+		}
+
 		totalSize := uint32(0)
 		for _, field := range fields[class] {
 			totalSize += field.Size
 		}
 		output += fmt.Sprintf(
 			"func Marshal%s(obj %s) [%d]byte {\n",
-			class,
-			class,
+			structName,
+			structName,
 			totalSize,
 		)
 		s := uint32(0)

@@ -373,9 +373,9 @@ func createTestStateMachine(
 	}
 
 	// For leader-only tests, set minimumProvers to 1
-	minimumProvers := uint64(2)
+	minimumProvers := func() uint64 { return uint64(2) }
 	if isLeader {
-		minimumProvers = 1
+		minimumProvers = func() uint64 { return uint64(1) }
 	}
 
 	return NewStateMachine(
@@ -384,7 +384,7 @@ func createTestStateMachine(
 		true, // shouldEmitReceiveEventsOnSends
 		minimumProvers,
 		&mockSyncProvider{syncDelay: 10 * time.Millisecond},
-		&mockVotingProvider{quorumSize: int(minimumProvers)},
+		&mockVotingProvider{quorumSize: int(minimumProvers())},
 		&mockLeaderProvider{
 			isLeader:   isLeader,
 			leaders:    leaders,
@@ -1016,7 +1016,7 @@ func (p *printtracer) Trace(message string) {
 }
 
 func TestStateMachinePanicRecovery(t *testing.T) {
-	minimumProvers := uint64(1)
+	minimumProvers := func() uint64 { return uint64(1) }
 
 	sm := NewStateMachine(
 		"leader1",

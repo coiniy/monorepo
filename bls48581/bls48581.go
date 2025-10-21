@@ -5,7 +5,9 @@ import (
 	gcrypto "crypto"
 	"encoding/binary"
 	"io"
+	"runtime"
 	"slices"
+	"sync"
 
 	"github.com/pkg/errors"
 	generated "source.quilibrium.com/quilibrium/monorepo/bls48581/generated/bls48581"
@@ -192,9 +194,125 @@ func VerifyMultiple(
 }
 
 func BlsAggregate(pks [][]byte, sigs [][]byte) crypto.BlsAggregateOutput {
-	ag := generated.BlsAggregate(pks, sigs)
-	pk := slices.Clone(ag.AggregatePublicKey)
-	sig := slices.Clone(ag.AggregateSignature)
+	// Handle edge cases
+	if len(pks) == 0 || len(sigs) == 0 || len(pks) != len(sigs) {
+		return &BlsAggregateOutput{
+			AggregatePublicKey: []byte{},
+			AggregateSignature: []byte{},
+		}
+	}
+
+	// For small inputs, use the non-parallelized version
+	// Parallelization overhead isn't worth it for small sets
+	const minParallelSize = 100
+	if len(pks) < minParallelSize {
+		ag := generated.BlsAggregate(pks, sigs)
+		pk := slices.Clone(ag.AggregatePublicKey)
+		sig := slices.Clone(ag.AggregateSignature)
+		return &BlsAggregateOutput{
+			AggregatePublicKey: pk,
+			AggregateSignature: sig,
+		}
+	}
+
+	// Determine optimal number of workers based on CPU cores and input size
+	numCPU := runtime.NumCPU()
+	numWorkers := numCPU
+
+	// Adjust workers based on input size - each worker should handle at least
+	// minParallelSize items
+	maxWorkers := len(pks) / minParallelSize
+	if numWorkers > maxWorkers {
+		numWorkers = maxWorkers
+	}
+
+	// Ensure at least 2 workers for parallelization
+	if numWorkers < 2 {
+		numWorkers = 2
+	}
+
+	// Calculate chunk size for even distribution
+	chunkSize := len(pks) / numWorkers
+	remainder := len(pks) % numWorkers
+
+	// Prepare for parallel aggregation
+	var wg sync.WaitGroup
+	wg.Add(numWorkers)
+
+	type aggregateResult struct {
+		pk  []byte
+		sig []byte
+		err error
+	}
+
+	results := make([]aggregateResult, numWorkers)
+
+	// Launch parallel workers
+	for i := 0; i < numWorkers; i++ {
+		workerIdx := i
+		start := workerIdx * chunkSize
+
+		// Distribute remainder across first workers
+		if workerIdx < remainder {
+			start += workerIdx
+		} else {
+			start += remainder
+		}
+
+		end := start + chunkSize
+		if workerIdx < remainder {
+			end++
+		}
+
+		// Ensure we don't go out of bounds
+		if end > len(pks) {
+			end = len(pks)
+		}
+
+		go func(idx, s, e int) {
+			defer wg.Done()
+
+			if s >= e {
+				results[idx] = aggregateResult{}
+				return
+			}
+
+			// Aggregate this chunk
+			chunkResult := generated.BlsAggregate(pks[s:e], sigs[s:e])
+			results[idx] = aggregateResult{
+				pk:  slices.Clone(chunkResult.AggregatePublicKey),
+				sig: slices.Clone(chunkResult.AggregateSignature),
+			}
+		}(workerIdx, start, end)
+	}
+
+	// Wait for all workers to complete
+	wg.Wait()
+
+	// Collect non-empty results for final aggregation
+	finalPks := make([][]byte, 0, numWorkers)
+	finalSigs := make([][]byte, 0, numWorkers)
+
+	for _, result := range results {
+		if len(result.pk) > 0 && len(result.sig) > 0 {
+			finalPks = append(finalPks, result.pk)
+			finalSigs = append(finalSigs, result.sig)
+		}
+	}
+
+	// If we only got one result (edge case), return it directly
+	if len(finalPks) == 1 {
+		return &BlsAggregateOutput{
+			AggregatePublicKey: finalPks[0],
+			AggregateSignature: finalSigs[0],
+		}
+	}
+
+	// Final aggregation of the parallel results
+	finalAg := generated.BlsAggregate(finalPks, finalSigs)
+	pk := slices.Clone(finalAg.AggregatePublicKey)
+	sig := slices.Clone(finalAg.AggregateSignature)
+
 	return &BlsAggregateOutput{
 		AggregatePublicKey: pk,
 		AggregateSignature: sig,

@@ -19,12 +19,12 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	logging "github.com/ipfs/go-log/v2"
 	host "github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	logging "github.com/libp2p/go-libp2p/gologshim"
 	httpauth "github.com/libp2p/go-libp2p/p2p/http/auth"
 	gostream "github.com/libp2p/go-libp2p/p2p/net/gostream"
 	ma "github.com/multiformats/go-multiaddr"
@@ -282,13 +282,19 @@ func (h *Host) setupListeners(listenerErrCh chan error) error {
 
 		var listenAddr ma.Multiaddr
 		if parsedAddr.useHTTPS && parsedAddr.sni != "" && parsedAddr.sni != host {
-			listenAddr, _ = ma.StringCast(fmt.Sprintf("/ip4/%s/tcp/%s/tls/sni/%s/http", host, port, parsedAddr.sni))
+			listenAddr, err = ma.StringCast(fmt.Sprintf("/ip4/%s/tcp/%s/tls/sni/%s/http", host, port, parsedAddr.sni))
+			if err != nil {
+				return err
+			}
 		} else {
 			scheme := "http"
 			if parsedAddr.useHTTPS {
 				scheme = "https"
 			}
-			listenAddr, _ = ma.StringCast(fmt.Sprintf("/ip4/%s/tcp/%s/%s", host, port, scheme))
+			listenAddr, err = ma.StringCast(fmt.Sprintf("/ip4/%s/tcp/%s/%s", host, port, scheme))
+			if err != nil {
+				return err
+			}
 		}
 
 		if parsedAddr.useHTTPS {
@@ -310,7 +316,7 @@ func (h *Host) setupListeners(listenerErrCh chan error) error {
 			h.httpTransport.listenAddrs = append(h.httpTransport.listenAddrs, listenAddr)
 		} else {
 			// We are not serving insecure HTTP
-			log.Warnf("Not serving insecure HTTP on %s. Prefer an HTTPS endpoint.", listenAddr)
+			log.Warn("Not serving insecure HTTP. Prefer an HTTPS endpoint.", "addr", listenAddr)
 		}
 	}
 	return nil
@@ -1009,6 +1015,10 @@ func parseMultiaddr(addr ma.Multiaddr) (explodedMultiaddr, error) {
 	out := explodedMultiaddr{}
 	var err error
 	ma.ForEach(addr, func(c ma.Component, e error) bool {
+		if e != nil {
+			return false
+		}
+
 		switch c.Protocol().Code {
 		case ma.P_IP4, ma.P_IP6, ma.P_DNS, ma.P_DNS4, ma.P_DNS6:
 			out.host = c.Value()

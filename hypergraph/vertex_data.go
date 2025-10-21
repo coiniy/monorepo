@@ -29,6 +29,9 @@ func (hg *HypergraphCRDT) GetVertexData(id [64]byte) (
 	*tries.VectorCommitmentTree,
 	error,
 ) {
+	hg.mu.RLock()
+	defer hg.mu.RUnlock()
+
 	timer := prometheus.NewTimer(GetDuration.WithLabelValues("vertex_data"))
 	defer timer.ObserveDuration()
 
@@ -44,6 +47,7 @@ func (hg *HypergraphCRDT) GetVertexData(id [64]byte) (
 		hg.vertexAdds,
 		hg.vertexRemoves,
 		hypergraph.VertexAtomType,
+		hg.getCoveredPrefix(),
 	)
 	if removeSet.Has(id) {
 		GetVertexDataTotal.WithLabelValues("removed").Inc()
@@ -69,6 +73,9 @@ func (hg *HypergraphCRDT) SetVertexData(
 	id [64]byte,
 	data *tries.VectorCommitmentTree,
 ) error {
+	hg.mu.Lock()
+	defer hg.mu.Unlock()
+
 	err := hg.store.SaveVertexTree(txn, id[:], data)
 	if err != nil {
 		VertexDataSetTotal.WithLabelValues("error").Inc()
@@ -79,56 +86,19 @@ func (hg *HypergraphCRDT) SetVertexData(
 	return nil
 }
 
-// MarkVertexDataForDeletion marks vertex data for future deletion. The data
-// will be pruned after the specified timestamp.
-func (hg *HypergraphCRDT) MarkVertexDataForDeletion(
+// RunDataPruning removes changesets up to the frame number given This should be
+// called periodically to clean up tombstoned data.
+func (hg *HypergraphCRDT) RunDataPruning(
 	txn tries.TreeBackingStoreTransaction,
-	deleteAt int64,
-	id [64]byte,
+	frameNumber uint64,
 ) error {
-	err := hg.store.TombstoneVertexTree(txn, deleteAt, id[:])
-	if err != nil {
-		VertexDataTombstoneTotal.WithLabelValues("error").Inc()
-		ErrorsTotal.WithLabelValues(
-			"tombstone_vertex_data",
-			"tombstone_error",
-		).Inc()
-		return err
-	}
-	VertexDataTombstoneTotal.WithLabelValues("success").Inc()
-	return nil
-}
+	hg.mu.Lock()
+	defer hg.mu.Unlock()
 
-// UnmarkVertexDataForDeletion cancels a scheduled deletion of vertex data. This
-// prevents the data from being pruned at the specified timestamp.
-func (hg *HypergraphCRDT) UnmarkVertexDataForDeletion(
-	txn tries.TreeBackingStoreTransaction,
-	deleteAt int64,
-	id [64]byte,
-) error {
-	err := hg.store.UndoTombstoneVertexTree(txn, deleteAt, id[:])
-	if err != nil {
-		VertexDataUndoTombstoneTotal.WithLabelValues("error").Inc()
-		ErrorsTotal.WithLabelValues(
-			"undo_tombstone_vertex_data",
-			"undo_error",
-		).Inc()
-		return err
-	}
-	VertexDataUndoTombstoneTotal.WithLabelValues("success").Inc()
-	return nil
-}
-
-// RunVertexDataPruning removes vertex data marked for deletion with a time
-// prior to the time this method is invoked. This should be called periodically
-// to clean up tombstoned data.
-func (hg *HypergraphCRDT) RunVertexDataPruning(
-	txn tries.TreeBackingStoreTransaction,
-) error {
 	timer := prometheus.NewTimer(VertexDataPruningDuration)
 	defer timer.ObserveDuration()
 
-	err := hg.store.ReapVertexTrees(txn)
+	err := hg.store.ReapOldChangesets(txn, frameNumber)
 	if err != nil {
 		VertexDataPruningTotal.WithLabelValues("error").Inc()
 		ErrorsTotal.WithLabelValues("prune_vertex_data", "reap_error").Inc()
@@ -142,11 +112,34 @@ func (hg *HypergraphCRDT) RunVertexDataPruning(
 // used when an error occurs creating the real iterator
 type noOpVertexDataIterator struct{}
 
-func (n *noOpVertexDataIterator) Key() []byte                        { return nil }
-func (n *noOpVertexDataIterator) First() bool                        { return false }
-func (n *noOpVertexDataIterator) Next() bool                         { return false }
-func (n *noOpVertexDataIterator) Prev() bool                         { return false }
-func (n *noOpVertexDataIterator) Valid() bool                        { return false }
-func (n *noOpVertexDataIterator) Value() *tries.VectorCommitmentTree { return nil }
-func (n *noOpVertexDataIterator) Close() error                       { return nil }
-func (n *noOpVertexDataIterator) Last() bool                         { return false }
+func (n *noOpVertexDataIterator) Key() []byte {
+	return nil
+}
+
+func (n *noOpVertexDataIterator) First() bool {
+	return false
+}
+
+func (n *noOpVertexDataIterator) Next() bool {
+	return false
+}
+
+func (n *noOpVertexDataIterator) Prev() bool {
+	return false
+}
+
+func (n *noOpVertexDataIterator) Valid() bool {
+	return false
+}
+
+func (n *noOpVertexDataIterator) Value() *tries.VectorCommitmentTree {
+	return nil
+}
+
+func (n *noOpVertexDataIterator) Close() error {
+	return nil
+}
+
+func (n *noOpVertexDataIterator) Last() bool {
+	return false
+}

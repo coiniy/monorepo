@@ -4,6 +4,7 @@ import (
 	"math/big"
 
 	"github.com/pkg/errors"
+	"source.quilibrium.com/quilibrium/monorepo/protobufs"
 	"source.quilibrium.com/quilibrium/monorepo/types/crypto"
 	"source.quilibrium.com/quilibrium/monorepo/types/tries"
 )
@@ -24,21 +25,44 @@ type Extrinsic struct {
 
 type Location [64]byte // 32 bytes for AppAddress + 32 bytes for DataAddress
 
+type ShardMetadata struct {
+	Commitment []byte
+	LeafCount  uint64
+	Size       uint64
+}
+
 var ErrInvalidAtomType = errors.New("invalid atom type for set")
 var ErrInvalidLocation = errors.New("invalid location")
 var ErrRemoved = errors.New("removed")
+
+// HyperStream defines the synchronization stream interface shared by a syncing
+// client and server instance.
+type HyperStream interface {
+	Send(*protobufs.HypergraphComparison) error
+	Recv() (*protobufs.HypergraphComparison, error)
+}
 
 // Hypergraph defines the interface for hypergraph operations. A hypergraph is a
 // higher-dimensional generalization of a graph where edges (hyperedges) can
 // connect any number of vertices or hyperedges themselves.
 type Hypergraph interface {
-	// GetSize returns the current total size of the hypergraph. The size is
-	// calculated as the sum of all added atoms' sizes minus removed atoms.
-	GetSize() *big.Int
+	// GetSize returns the current total size of the hypergraph or at a key. The
+	// size is calculated as the sum of all added atoms' sizes minus removed
+	// atoms.
+	GetSize(shardKey *tries.ShardKey, path []int) *big.Int
 
 	// Commit calculates the hierarchical vector commitments for each shard's
 	// add/remove sets and returns the roots.
-	Commit() [][]byte
+	Commit() map[tries.ShardKey][][]byte
+
+	// SetCoveredPrefix sets a prefix where inserted values are retained. Values
+	// outside of this will be rejected – synchronization will only set neighbor
+	// and ascendant branches.
+	SetCoveredPrefix(prefix []int) error
+
+	// GetMetadataAtKey is a fast path to retrieve metadata information used for
+	// consensus, avoiding unnecessary recomputation for lookups.
+	GetMetadataAtKey(pathKey []byte) ([]ShardMetadata, error)
 
 	// Vertex operations
 
@@ -119,21 +143,9 @@ type Hypergraph interface {
 	// containment and recursive containment through nested hyperedges.
 	Within(a, h Atom) bool
 
-	// Access to sets
-
+	// GetVertexDataIterator exposes an iterator to enumerate all data objects
+	// stored under the given domain
 	GetVertexDataIterator(domain [32]byte) tries.VertexDataIterator
-
-	// GetVertexAdds returns the map of vertex add sets by shard key.
-	GetVertexAdds() map[tries.ShardKey]*IdSet
-
-	// GetVertexRemoves returns the map of vertex remove sets by shard key.
-	GetVertexRemoves() map[tries.ShardKey]*IdSet
-
-	// GetHyperedgeAdds returns the map of hyperedge add sets by shard key.
-	GetHyperedgeAdds() map[tries.ShardKey]*IdSet
-
-	// GetHyperedgeRemoves returns the map of hyperedge remove sets by shard key.
-	GetHyperedgeRemoves() map[tries.ShardKey]*IdSet
 
 	// Import operations
 
@@ -161,25 +173,12 @@ type Hypergraph interface {
 		data *tries.VectorCommitmentTree,
 	) error
 
-	// MarkVertexDataForDeletion schedules vertex data for deletion at the
-	// specified time. The data won't be immediately deleted to allow for frame
-	// rewind events to avoid needing resynchronization.
-	MarkVertexDataForDeletion(
+	// RunDataPruning executes the deletion of changesets prior to the given
+	// frame number. This should be called periodically to save room.
+	RunDataPruning(
 		txn tries.TreeBackingStoreTransaction,
-		deleteAt int64,
-		id [64]byte,
+		frameNumber uint64,
 	) error
-
-	// UnmarkVertexDataForDeletion cancels a scheduled deletion of vertex data.
-	UnmarkVertexDataForDeletion(
-		txn tries.TreeBackingStoreTransaction,
-		deleteAt int64,
-		id [64]byte,
-	) error
-
-	// RunVertexDataPruning executes the deletion of vertex data that has been
-	// marked for deletion and whose deletion time has passed.
-	RunVertexDataPruning(txn tries.TreeBackingStoreTransaction) error
 
 	// Hyperedge data operations
 
@@ -209,6 +208,49 @@ type Hypergraph interface {
 		traversalProof *tries.TraversalProof,
 	) (bool, error)
 
+	// Reversion-oriented methods
+
+	// TrackChange tracks a previous state for data for reversion purposes.
+	TrackChange(
+		txn tries.TreeBackingStoreTransaction,
+		key []byte,
+		oldValue *tries.VectorCommitmentTree,
+		frameNumber uint64,
+		phaseType string,
+		setType string,
+		shardKey tries.ShardKey,
+	) error
+
+	// GetChanges returns the set of previous states in reverse chronological
+	// order.
+	GetChanges(
+		frameStart uint64,
+		frameEnd uint64,
+		phaseType string,
+		setType string,
+		shardKey tries.ShardKey,
+	) ([]*tries.ChangeRecord, error)
+
+	// RevertChanges reverts the set of changes in reverse chronological order.
+	RevertChanges(
+		txn tries.TreeBackingStoreTransaction,
+		frameStart uint64,
+		frameEnd uint64,
+		shardKey tries.ShardKey,
+	) error
+
+	// Synchronization operations
+
+	// Embeds the comparison service
+	protobufs.HypergraphComparisonServiceServer
+
+	// Sync is the client-side initiator for synchronization.
+	Sync(
+		stream protobufs.HypergraphComparisonService_HyperStreamClient,
+		shardKey tries.ShardKey,
+		phaseSet protobufs.HypergraphPhaseSet,
+	) error
+
 	// Transaction and utility operations
 
 	// NewTransaction creates a new transaction for batch operations.
@@ -217,7 +259,7 @@ type Hypergraph interface {
 		error,
 	)
 
-	// GetProver returns the inclusion prover used for triesgraphic operations.
+	// GetProver returns the inclusion prover used for cryptographic operations.
 	GetProver() crypto.InclusionProver
 }
 

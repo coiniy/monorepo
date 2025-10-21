@@ -51,7 +51,7 @@ func (n *VectorCommitmentLeafNode) Commit(
 	prover crypto.InclusionProver,
 	recalculate bool,
 ) []byte {
-	if n.Commitment == nil || recalculate {
+	if len(n.Commitment) == 0 || recalculate {
 		h := sha512.New()
 		h.Write([]byte{0})
 		h.Write(n.Key)
@@ -74,7 +74,7 @@ func (n *VectorCommitmentBranchNode) Commit(
 	prover crypto.InclusionProver,
 	recalculate bool,
 ) []byte {
-	if n.Commitment == nil || recalculate {
+	if len(n.Commitment) == 0 || recalculate {
 		vector := make([][]byte, len(n.Children))
 		wg := sync.WaitGroup{}
 		throttle := make(chan struct{}, runtime.WorkerCount(0, false, false))
@@ -121,7 +121,7 @@ func (n *VectorCommitmentBranchNode) Verify(
 	proof []byte,
 ) bool {
 	data := []byte{}
-	if n.Commitment == nil {
+	if len(n.Commitment) == 0 {
 		for _, child := range n.Children {
 			if child != nil {
 				out := child.Commit(prover, false)
@@ -237,7 +237,7 @@ func getNextNibble(key []byte, pos int) int {
 	return result & BranchMask
 }
 
-func getFullPath(key []byte) []int {
+func GetFullPath(key []byte) []int {
 	var nibbles []int
 	depth := 0
 	for {

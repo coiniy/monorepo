@@ -9,21 +9,17 @@ import (
 
 type ClockStore interface {
 	NewTransaction(indexed bool) (Transaction, error)
-	GetLatestGlobalClockFrame(filter []byte) (*protobufs.GlobalFrame, error)
-	GetEarliestGlobalClockFrame(filter []byte) (*protobufs.GlobalFrame, error)
-	GetGlobalClockFrame(
-		filter []byte,
-		frameNumber uint64,
-	) (*protobufs.GlobalFrame, error)
+	GetLatestGlobalClockFrame() (*protobufs.GlobalFrame, error)
+	GetEarliestGlobalClockFrame() (*protobufs.GlobalFrame, error)
+	GetGlobalClockFrame(frameNumber uint64) (*protobufs.GlobalFrame, error)
 	RangeGlobalClockFrames(
-		filter []byte,
 		startFrameNumber uint64,
 		endFrameNumber uint64,
 	) (TypedIterator[*protobufs.GlobalFrame], error)
 	PutGlobalClockFrame(frame *protobufs.GlobalFrame, txn Transaction) error
 	GetLatestShardClockFrame(
 		filter []byte,
-	) (*protobufs.GlobalFrame, []*tries.RollingFrecencyCritbitTrie, error)
+	) (*protobufs.AppShardFrame, []*tries.RollingFrecencyCritbitTrie, error)
 	GetEarliestShardClockFrame(filter []byte) (*protobufs.AppShardFrame, error)
 	GetShardClockFrame(
 		filter []byte,
@@ -62,7 +58,7 @@ type ClockStore interface {
 		filter []byte,
 		frameNumber uint64,
 	) error
-	ResetGlobalClockFrames(filter []byte) error
+	ResetGlobalClockFrames() error
 	ResetShardClockFrames(filter []byte) error
 	Compact(
 		dataFilter []byte,
@@ -91,6 +87,10 @@ type ClockStore interface {
 	SetProverTriesForShardFrame(
 		frame *protobufs.AppShardFrame,
 		tries []*tries.RollingFrecencyCritbitTrie,
+	) error
+	DeleteGlobalClockFrameRange(
+		minFrameNumber uint64,
+		maxFrameNumber uint64,
 	) error
 	DeleteShardClockFrameRange(
 		filter []byte,

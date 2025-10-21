@@ -290,7 +290,7 @@ loop:
 				// spawn the dial
 				ad, ok := w.trackedDials[string(adelay.Addr.Bytes())]
 				if !ok {
-					log.Errorf("SWARM BUG: no entry for address %s in trackedDials", adelay.Addr)
+					log.Error("SWARM BUG: no entry for address in trackedDials", "addr", adelay.Addr)
 					continue
 				}
 				ad.dialed = true
@@ -317,7 +317,7 @@ loop:
 
 			ad, ok := w.trackedDials[string(res.Addr.Bytes())]
 			if !ok {
-				log.Errorf("SWARM BUG: no entry for address %s in trackedDials", res.Addr)
+				log.Error("SWARM BUG: no entry for address in trackedDials", "addr", res.Addr)
 				if res.Conn != nil {
 					res.Conn.Close()
 				}
@@ -330,7 +330,7 @@ loop:
 			if res.Kind == tpt.UpdateKindHandshakeProgressed {
 				// Only wait for public addresses to complete dialing since private dials
 				// are quick any way
-				if pubadd, err := manet.IsPublicAddr(res.Addr); err == nil && pubadd {
+				if isPubAddr, err := manet.IsPublicAddr(res.Addr); isPubAddr && err == nil {
 					ad.expectedTCPUpgradeTime = w.cl.Now().Add(PublicTCPDelay)
 				}
 				scheduleNextDial()
@@ -373,8 +373,8 @@ loop:
 				// for consistency with the old dialer behavior.
 				w.s.backf.AddBackoff(w.peer, res.Addr)
 			} else if res.Err == ErrDialRefusedBlackHole {
-				log.Errorf("SWARM BUG: unexpected ErrDialRefusedBlackHole while dialing peer %s to addr %s",
-					w.peer, res.Addr)
+				log.Error("SWARM BUG: unexpected ErrDialRefusedBlackHole while dialing peer to addr",
+					"peer", w.peer, "addr", res.Addr)
 			}
 
 			w.dispatchError(ad, res.Err)

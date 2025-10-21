@@ -22,18 +22,24 @@ type Intrinsic interface {
 		creator []byte,
 		fee *big.Int,
 		contextData []byte,
+		frameNumber uint64,
+		state state.State,
 	) (state.State, error)
 	// Locks addresses for writing or reading
-	Lock(writeAddresses [][]byte, readAddresses [][]byte) error
+	Lock(frameNumber uint64, input []byte) ([][]byte, error)
 	// Unlocks addresses for writing or reading
-	Unlock(writeAddresses [][]byte, readAddresses [][]byte) error
+	Unlock() error
+	// Performs strictly the validation of an intrinsic operation, encoded via
+	// the ToBytes method of the given operation
+	Validate(frameNumber uint64, input []byte) error
 	// Performs an invocation of an intrinsic operation, encoded via the ToBytes
 	// method of the given operation, and returns the settled state to be
 	// accepted
 	InvokeStep(
 		frameNumber uint64,
 		input []byte,
-		fee *big.Int,
+		feePaid *big.Int,
+		feeMultiplier *big.Int,
 		state state.State,
 	) (state.State, error)
 	// Performs a sum check (not applicable for this release)
@@ -53,5 +59,5 @@ type IntrinsicOperation interface {
 	// Verifies the proofs of the operation
 	Verify(frameNumber uint64) (bool, error)
 	// Returns the settled state from performing the operation
-	Materialize(state state.State) (state.State, error)
+	Materialize(frameNumber uint64, state state.State) (state.State, error)
 }

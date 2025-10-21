@@ -10,93 +10,207 @@ type MockSignerRegistry struct {
 	mock.Mock
 }
 
-func (m *MockSignerRegistry) GetSigner(address [32]byte) (interface{}, error) {
-	args := m.Called(address)
-	return args.Get(0), args.Error(1)
+// GetKeyRegistry retrieves the complete key registry for an identity key
+// address
+func (m *MockSignerRegistry) GetKeyRegistry(identityKeyAddress []byte) (
+	*protobufs.KeyRegistry,
+	error,
+) {
+	args := m.Called(identityKeyAddress)
+	return args.Get(0).(*protobufs.KeyRegistry), args.Error(1)
 }
 
-func (m *MockSignerRegistry) GetSignerByPublicKey(
-	publicKey []byte,
-) (interface{}, error) {
-	args := m.Called(publicKey)
-	return args.Get(0), args.Error(1)
+// GetKeyRegistryByProver retrieves the complete key registry for a prover key
+// address
+func (m *MockSignerRegistry) GetKeyRegistryByProver(proverKeyAddress []byte) (
+	*protobufs.KeyRegistry,
+	error,
+) {
+	args := m.Called(proverKeyAddress)
+	return args.Get(0).(*protobufs.KeyRegistry), args.Error(1)
 }
 
+// ValidateIdentityKey validates an Ed448 identity key
+func (m *MockSignerRegistry) ValidateIdentityKey(
+	identityKey *protobufs.Ed448PublicKey,
+) error {
+	args := m.Called(identityKey)
+	return args.Error(0)
+}
+
+// ValidateProvingKey validates a BLS48581 proving key with proof of possession
 func (m *MockSignerRegistry) ValidateProvingKey(
-	provingKey *protobufs.ProvingKeyAnnouncement,
+	provingKey *protobufs.BLS48581SignatureWithProofOfPossession,
 ) error {
 	args := m.Called(provingKey)
 	return args.Error(0)
 }
 
-func (m *MockSignerRegistry) ValidateKeyBundle(
-	bundle *protobufs.KeyBundleAnnouncement,
+// ValidateSignedX448Key validates a signed X448 key
+func (m *MockSignerRegistry) ValidateSignedX448Key(
+	signedKey *protobufs.SignedX448Key,
 ) error {
-	args := m.Called(bundle)
+	args := m.Called(signedKey)
 	return args.Error(0)
 }
 
-func (m *MockSignerRegistry) IncludeProvingKey(
-	inclusionCommitment *protobufs.InclusionCommitment,
+// ValidateSignedDecaf448Key validates a signed Decaf448 key
+func (m *MockSignerRegistry) ValidateSignedDecaf448Key(
+	signedKey *protobufs.SignedDecaf448Key,
+) error {
+	args := m.Called(signedKey)
+	return args.Error(0)
+}
+
+// PutIdentityKey stores an identity key
+func (m *MockSignerRegistry) PutIdentityKey(
 	txn store.Transaction,
+	address []byte,
+	identityKey *protobufs.Ed448PublicKey,
 ) error {
-	args := m.Called(inclusionCommitment, txn)
+	args := m.Called(txn, address, identityKey)
 	return args.Error(0)
 }
 
-func (m *MockSignerRegistry) StageProvingKey(
-	provingKey *protobufs.ProvingKeyAnnouncement,
-) error {
-	args := m.Called(provingKey)
-	return args.Error(0)
-}
-
-func (m *MockSignerRegistry) PutKeyBundle(
-	provingKey []byte,
-	keyBundle *protobufs.InclusionCommitment,
+// PutProvingKey stores a proving key with proof of possession
+func (m *MockSignerRegistry) PutProvingKey(
 	txn store.Transaction,
+	address []byte,
+	provingKey *protobufs.BLS48581SignatureWithProofOfPossession,
 ) error {
-	args := m.Called(provingKey, keyBundle, txn)
+	args := m.Called(txn, address, provingKey)
 	return args.Error(0)
 }
 
-func (m *MockSignerRegistry) GetProvingKey(
-	provingKey []byte,
-) (*protobufs.InclusionCommitment, error) {
-	args := m.Called(provingKey)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*protobufs.InclusionCommitment), args.Error(1)
+// PutCrossSignature stores cross signatures between identity and proving keys
+func (m *MockSignerRegistry) PutCrossSignature(
+	txn store.Transaction,
+	identityKeyAddress []byte,
+	provingKeyAddress []byte,
+	identityKeySignatureOfProvingKey []byte,
+	provingKeySignatureOfIdentityKey []byte,
+) error {
+	args := m.Called(
+		txn,
+		identityKeyAddress,
+		provingKeyAddress,
+		identityKeySignatureOfProvingKey,
+		provingKeySignatureOfIdentityKey,
+	)
+	return args.Error(0)
 }
 
-func (m *MockSignerRegistry) GetLatestKeyBundle(
-	provingKey []byte,
-) (*protobufs.InclusionCommitment, error) {
-	args := m.Called(provingKey)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*protobufs.InclusionCommitment), args.Error(1)
+// PutSignedX448Key stores a signed X448 key
+func (m *MockSignerRegistry) PutSignedX448Key(
+	txn store.Transaction,
+	address []byte,
+	key *protobufs.SignedX448Key,
+) error {
+	args := m.Called(txn, address, key)
+	return args.Error(0)
 }
 
-func (m *MockSignerRegistry) GetKeyBundle(
-	provingKey []byte,
-	frameNumber uint64,
-) (*protobufs.InclusionCommitment, error) {
-	args := m.Called(provingKey, frameNumber)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*protobufs.InclusionCommitment), args.Error(1)
+// PutSignedDecaf448Key stores a signed Decaf448 key
+func (m *MockSignerRegistry) PutSignedDecaf448Key(
+	txn store.Transaction,
+	address []byte,
+	key *protobufs.SignedDecaf448Key,
+) error {
+	args := m.Called(txn, address, key)
+	return args.Error(0)
 }
 
-func (m *MockSignerRegistry) GetStagedProvingKey(
-	provingKey []byte,
-) (*protobufs.ProvingKeyAnnouncement, error) {
-	args := m.Called(provingKey)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*protobufs.ProvingKeyAnnouncement), args.Error(1)
+// GetIdentityKey retrieves an identity key by address
+func (m *MockSignerRegistry) GetIdentityKey(address []byte) (
+	*protobufs.Ed448PublicKey,
+	error,
+) {
+	args := m.Called(address)
+	return args.Get(0).(*protobufs.Ed448PublicKey), args.Error(1)
+}
+
+// GetProvingKey retrieves a proving key by address
+func (m *MockSignerRegistry) GetProvingKey(address []byte) (
+	*protobufs.BLS48581SignatureWithProofOfPossession,
+	error,
+) {
+	args := m.Called(address)
+	return args.Get(0).(*protobufs.BLS48581SignatureWithProofOfPossession),
+		args.Error(1)
+}
+
+// GetSignedX448Key retrieves a signed key by address
+func (m *MockSignerRegistry) GetSignedX448Key(address []byte) (
+	*protobufs.SignedX448Key,
+	error,
+) {
+	args := m.Called(address)
+	return args.Get(0).(*protobufs.SignedX448Key), args.Error(1)
+}
+
+// GetSignedX448KeysByParent retrieves all signed keys for a parent key
+func (m *MockSignerRegistry) GetSignedX448KeysByParent(
+	parentKeyAddress []byte,
+	keyPurpose string,
+) ([]*protobufs.SignedX448Key, error) {
+	args := m.Called(parentKeyAddress, keyPurpose)
+	return args.Get(0).([]*protobufs.SignedX448Key), args.Error(1)
+}
+
+// GetSignedDecaf448Key retrieves a signed key by address
+func (m *MockSignerRegistry) GetSignedDecaf448Key(address []byte) (
+	*protobufs.SignedDecaf448Key,
+	error,
+) {
+	args := m.Called(address)
+	return args.Get(0).(*protobufs.SignedDecaf448Key), args.Error(1)
+}
+
+// GetSignedDecaf448KeysByParent retrieves all signed keys for a parent key
+func (m *MockSignerRegistry) GetSignedDecaf448KeysByParent(
+	parentKeyAddress []byte,
+	keyPurpose string,
+) ([]*protobufs.SignedDecaf448Key, error) {
+	args := m.Called(parentKeyAddress, keyPurpose)
+	return args.Get(0).([]*protobufs.SignedDecaf448Key), args.Error(1)
+}
+
+// RangeProvingKeys returns an iterator over all proving keys
+func (m *MockSignerRegistry) RangeProvingKeys() (
+	store.TypedIterator[*protobufs.BLS48581SignatureWithProofOfPossession],
+	error,
+) {
+	args := m.Called()
+	return args.Get(0).(store.TypedIterator[*protobufs.BLS48581SignatureWithProofOfPossession]),
+		args.Error(1)
+}
+
+// RangeIdentityKeys returns an iterator over all identity keys
+func (m *MockSignerRegistry) RangeIdentityKeys() (
+	store.TypedIterator[*protobufs.Ed448PublicKey],
+	error,
+) {
+	args := m.Called()
+	return args.Get(0).(store.TypedIterator[*protobufs.Ed448PublicKey]),
+		args.Error(1)
+}
+
+// RangeSignedX448Keys returns an iterator over signed keys
+func (m *MockSignerRegistry) RangeSignedX448Keys(
+	parentKeyAddress []byte,
+	keyPurpose string,
+) (store.TypedIterator[*protobufs.SignedX448Key], error) {
+	args := m.Called(parentKeyAddress, keyPurpose)
+	return args.Get(0).(store.TypedIterator[*protobufs.SignedX448Key]),
+		args.Error(1)
+}
+
+// RangeSignedDecaf448Keys returns an iterator over signed keys
+func (m *MockSignerRegistry) RangeSignedDecaf448Keys(
+	parentKeyAddress []byte,
+	keyPurpose string,
+) (store.TypedIterator[*protobufs.SignedDecaf448Key], error) {
+	args := m.Called(parentKeyAddress, keyPurpose)
+	return args.Get(0).(store.TypedIterator[*protobufs.SignedDecaf448Key]),
+		args.Error(1)
 }

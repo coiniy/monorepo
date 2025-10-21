@@ -23,7 +23,7 @@ func EncryptedToVertexTree(
 			id,
 			dataBytes,
 			d.GetStatement(),
-			big.NewInt(int64(len(encrypted)*55)),
+			big.NewInt(55),
 		)
 	}
 	dataTree.Commit(prover, false)

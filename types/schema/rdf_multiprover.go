@@ -5,9 +5,11 @@ import (
 	"crypto/sha512"
 	"maps"
 	"math/big"
+	"slices"
 	"strings"
 	"sync"
 
+	"github.com/iden3/go-iden3-crypto/poseidon"
 	"github.com/pkg/errors"
 	"source.quilibrium.com/quilibrium/monorepo/types/crypto"
 	qcrypto "source.quilibrium.com/quilibrium/monorepo/types/tries"
@@ -60,6 +62,40 @@ func (m *RDFMultiprover) getOrParseDocument(
 	m.cacheMutex.Unlock()
 
 	return tags, nil
+}
+
+func (m *RDFMultiprover) GetType(
+	document string,
+	domain []byte,
+	tree *qcrypto.VectorCommitmentTree,
+) (string, error) {
+	// Parse RDF document to get field and class names
+	tagsByClass, err := m.getOrParseDocument(document)
+	if err != nil {
+		return "", errors.Wrap(err, "get type")
+	}
+
+	typeHash, err := tree.Get(bytes.Repeat([]byte{0xff}, 32))
+	if err != nil {
+		return "", errors.Wrap(err, "get type")
+	}
+
+	for k := range tagsByClass {
+		typeBI, err := poseidon.HashBytes(
+			slices.Concat(domain, []byte(k)),
+		)
+
+		if err != nil {
+			return "", errors.Wrap(err, "get type")
+		}
+
+		typeBytes := typeBI.FillBytes(make([]byte, 32))
+		if bytes.Equal(typeHash, typeBytes) {
+			return k, nil
+		}
+	}
+
+	return "", errors.Wrap(errors.New("type not found"), "get type")
 }
 
 // ProveWithType generates a multiproof for the specified fields with an
@@ -208,6 +244,10 @@ func (m *RDFMultiprover) VerifyWithType(
 	commits := make([][]byte, 0, len(fields)+1)
 	evaluations := make([][]byte, 0, len(fields)+1)
 
+	// Determine the maximum order value to select appropriate polynomial size
+	maxOrder := GetMaxOrderForDocument(tagsByClass)
+	polySize := GetPolySizeForMaxOrder(maxOrder)
+
 	for i, field := range fields {
 		var tag *RDFTag
 		var found bool
@@ -255,7 +295,7 @@ func (m *RDFMultiprover) VerifyWithType(
 			h.Write(keys[i])
 		} else {
 			// Use flexible order encoding
-			key, err := OrderToKey(tag.Order)
+			key, err := OrderToKey(tag.Order, maxOrder)
 			if err != nil {
 				return false, errors.Wrap(err, "verify")
 			}
@@ -288,10 +328,6 @@ func (m *RDFMultiprover) VerifyWithType(
 	if err := mp.FromBytes(proof); err != nil {
 		return false, errors.Wrap(err, "verify")
 	}
-
-	// Determine the maximum order value to select appropriate polynomial size
-	maxOrder := GetMaxOrderForDocument(tagsByClass)
-	polySize := GetPolySizeForMaxOrder(maxOrder)
 
 	// Verify multiproof
 	valid := m.inclusionProver.VerifyMultiple(
@@ -350,8 +386,11 @@ func (m *RDFMultiprover) Get(
 		)
 	}
 
+	// Determine the maximum order value to select appropriate polynomial size
+	maxOrder := GetMaxOrderForDocument(tagsByClass)
+
 	// Get value from tree using flexible order encoding
-	key, err := OrderToKey(tag.Order)
+	key, err := OrderToKey(tag.Order, maxOrder)
 	if err != nil {
 		return nil, errors.Wrap(err, "get")
 	}
@@ -375,23 +414,28 @@ func (m *RDFMultiprover) GetFieldOrder(
 	document string,
 	rdfClass string,
 	field string,
-) (int, error) {
+) (int, int, error) {
 	tagsByClass, err := m.getOrParseDocument(document)
 	if err != nil {
-		return -1, errors.Wrap(err, "get field order")
+		return -1, -1, errors.Wrap(err, "get field order")
 	}
 
 	classTags, ok := tagsByClass[rdfClass]
 	if !ok {
-		return -1, errors.Errorf("class %s not found in RDF schema", rdfClass)
+		return -1, -1, errors.Errorf("class %s not found in RDF schema", rdfClass)
 	}
 
 	tag, ok := classTags[field]
 	if !ok {
-		return -1, errors.Errorf("field %s not found in class %s", field, rdfClass)
+		return -1, -1, errors.Errorf(
+			"field %s not found in class %s", field, rdfClass,
+		)
 	}
 
-	return tag.Order, nil
+	// Determine the maximum order value to select appropriate polynomial size
+	maxOrder := GetMaxOrderForDocument(tagsByClass)
+
+	return tag.Order, maxOrder, nil
 }
 
 // GetFieldKey returns the key bytes for a specific field using flexible
@@ -401,17 +445,18 @@ func (m *RDFMultiprover) GetFieldKey(
 	rdfClass string,
 	field string,
 ) ([]byte, error) {
-	order, err := m.GetFieldOrder(document, rdfClass, field)
+	order, maxOrder, err := m.GetFieldOrder(document, rdfClass, field)
 	if err != nil {
 		return nil, err
 	}
 
-	return OrderToKey(order)
+	return OrderToKey(order, maxOrder)
 }
 
 // Set stores a field value in the tree using RDF ordering
 func (m *RDFMultiprover) Set(
 	document string,
+	domain []byte,
 	rdfClass string,
 	field string,
 	value []byte,
@@ -421,6 +466,42 @@ func (m *RDFMultiprover) Set(
 	tagsByClass, err := m.getOrParseDocument(document)
 	if err != nil {
 		return errors.Wrap(err, "set")
+	}
+
+	typeHash, err := tree.Get(bytes.Repeat([]byte{0xff}, 32))
+	if err != nil {
+		typeBI, err := poseidon.HashBytes(
+			slices.Concat(domain, []byte(rdfClass)),
+		)
+
+		if err != nil {
+			return errors.Wrap(err, "set")
+		}
+
+		typeBytes := typeBI.FillBytes(make([]byte, 32))
+		err = tree.Insert(
+			bytes.Repeat([]byte{0xff}, 32),
+			typeBytes,
+			nil,
+			big.NewInt(32),
+		)
+		if err != nil {
+			return errors.Wrap(err, "set")
+		}
+		typeHash = typeBytes
+	} else {
+		typeBI, err := poseidon.HashBytes(
+			slices.Concat(domain, []byte(rdfClass)),
+		)
+
+		if err != nil {
+			return errors.Wrap(err, "set")
+		}
+
+		typeBytes := typeBI.FillBytes(make([]byte, 32))
+		if !bytes.Equal(typeHash, typeBytes) {
+			return errors.Wrap(errors.New("invalid type for existing tree"), "set")
+		}
 	}
 
 	// Find the class
@@ -441,8 +522,11 @@ func (m *RDFMultiprover) Set(
 		)
 	}
 
+	// Determine the maximum order value to select appropriate polynomial size
+	maxOrder := GetMaxOrderForDocument(tagsByClass)
+
 	// Set value in tree using flexible order encoding
-	key, err := OrderToKey(tag.Order)
+	key, err := OrderToKey(tag.Order, maxOrder)
 	if err != nil {
 		return errors.Wrap(err, "set")
 	}
@@ -471,9 +555,10 @@ func (m *RDFMultiprover) GetSchemaMap(
 // types.
 func (m *RDFMultiprover) Validate(
 	document string,
+	domain []byte,
 	tree *qcrypto.VectorCommitmentTree,
 ) (bool, error) {
-	return m.ValidateWithOptions(document, tree, false)
+	return m.ValidateWithOptions(document, domain, tree, false)
 }
 
 // ValidateWithOptions confirms only the indexes of the tree specified in the
@@ -483,6 +568,7 @@ func (m *RDFMultiprover) Validate(
 // for VerEnc data).
 func (m *RDFMultiprover) ValidateWithOptions(
 	document string,
+	domain []byte,
 	tree *qcrypto.VectorCommitmentTree,
 	skipTypeVerification bool,
 ) (bool, error) {
@@ -496,9 +582,12 @@ func (m *RDFMultiprover) ValidateWithOptions(
 	expectedIndexes := make(map[string]struct{})
 	fieldsByKey := make(map[string]*RDFTag)
 
+	// Determine the maximum order value to select appropriate polynomial size
+	maxOrder := GetMaxOrderForDocument(tagsByClass)
+
 	for _, classTags := range tagsByClass {
 		for _, tag := range classTags {
-			key, err := OrderToKey(tag.Order)
+			key, err := OrderToKey(tag.Order, maxOrder)
 			if err != nil {
 				return false, errors.Wrap(err, "validate")
 			}
@@ -514,6 +603,35 @@ func (m *RDFMultiprover) ValidateWithOptions(
 	// Check that only expected indexes are present
 	for _, leaf := range leaves {
 		keyStr := string(leaf.Key)
+
+		// Handle the special type key (0xff...ff)
+		if bytes.Equal(leaf.Key, bytes.Repeat([]byte{0xff}, 32)) {
+			// Validate that the type hash matches one of the class names
+			foundValidType := false
+			for className := range tagsByClass {
+				// Hash the class name with domain
+				typeBI, err := poseidon.HashBytes(
+					slices.Concat(domain, []byte(className)),
+				)
+				if err != nil {
+					return false, errors.Wrap(err, "validate type hash")
+				}
+
+				typeBytes := typeBI.FillBytes(make([]byte, 32))
+				if bytes.Equal(leaf.Value, typeBytes) {
+					foundValidType = true
+					break
+				}
+			}
+
+			if !foundValidType {
+				return false, errors.Wrap(
+					errors.New("type key contains invalid class type"),
+					"validate with options",
+				)
+			}
+			continue
+		}
 
 		// Check if this key is expected
 		if _, expected := expectedIndexes[keyStr]; !expected {

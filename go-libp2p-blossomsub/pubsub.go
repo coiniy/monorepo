@@ -159,7 +159,8 @@ type PubSub struct {
 	blacklist     Blacklist
 	blacklistPeer chan peer.ID
 
-	peers map[peer.ID]*rpcQueue
+	peerMx sync.RWMutex
+	peers  map[peer.ID]*rpcQueue
 
 	inboundStreamsMx sync.Mutex
 	inboundStreams   map[peer.ID]network.Stream
@@ -596,7 +597,9 @@ func (p *PubSub) processLoop(ctx context.Context) {
 		case s := <-p.newPeerStream:
 			pid := s.Conn().RemotePeer()
 
+			p.peerMx.RLock()
 			q, ok := p.peers[pid]
+			p.peerMx.RUnlock()
 			if !ok {
 				log.Warn("new stream for unknown peer: ", pid)
 				s.Reset()
@@ -606,7 +609,9 @@ func (p *PubSub) processLoop(ctx context.Context) {
 			if p.blacklist.Contains(pid) {
 				log.Warn("closing stream for blacklisted peer: ", pid)
 				_ = q.Close()
+				p.peerMx.Lock()
 				delete(p.peers, pid)
+				p.peerMx.Unlock()
 				s.Reset()
 				continue
 			}
@@ -664,10 +669,14 @@ func (p *PubSub) processLoop(ctx context.Context) {
 			log.Infof("Blacklisting peer %s", pid)
 			p.blacklist.Add(pid)
 
+			p.peerMx.RLock()
 			q, ok := p.peers[pid]
+			p.peerMx.RUnlock()
 			if ok {
 				_ = q.Close()
+				p.peerMx.Lock()
 				delete(p.peers, pid)
+				p.peerMx.Unlock()
 				for t, tmap := range p.bitmasks {
 					if _, ok := tmap[pid]; ok {
 						delete(tmap, pid)
@@ -742,7 +751,10 @@ func (p *PubSub) handlePendingPeers() {
 			continue
 		}
 
-		if _, ok := p.peers[pid]; ok {
+		p.peerMx.RLock()
+		_, ok := p.peers[pid]
+		p.peerMx.RUnlock()
+		if ok {
 			log.Debug("already have connection to peer: ", pid)
 			continue
 		}
@@ -759,7 +771,10 @@ func (p *PubSub) handlePendingPeers() {
 			continue
 		}
 		go p.handleNewPeer(p.ctx, pid, q)
+
+		p.peerMx.Lock()
 		p.peers[pid] = q
+		p.peerMx.Unlock()
 	}
 }
 
@@ -776,13 +791,17 @@ func (p *PubSub) handleDeadPeers() {
 	p.peerDeadPrioLk.Unlock()
 
 	for pid := range deadPeers {
+		p.peerMx.RLock()
 		q, ok := p.peers[pid]
+		p.peerMx.RUnlock()
 		if !ok {
 			continue
 		}
 
 		_ = q.Close()
+		p.peerMx.Lock()
 		delete(p.peers, pid)
+		p.peerMx.Unlock()
 
 		for t, tmap := range p.bitmasks {
 			if _, ok := tmap[pid]; ok {
@@ -809,7 +828,10 @@ func (p *PubSub) handleDeadPeers() {
 				_ = q.Close()
 				continue
 			}
+
+			p.peerMx.Lock()
 			p.peers[pid] = q
+			p.peerMx.Unlock()
 			go p.handleNewPeerWithBackoff(p.ctx, pid, backoffDelay, q)
 		}
 	}
@@ -1005,7 +1027,9 @@ func (p *PubSub) announceRetry(pid peer.ID, bitmask []byte, sub bool) {
 }
 
 func (p *PubSub) doAnnounceRetry(pid peer.ID, bitmask []byte, sub bool) {
+	p.peerMx.RLock()
 	q, ok := p.peers[pid]
+	p.peerMx.RUnlock()
 	if !ok {
 		return
 	}
@@ -1323,13 +1347,9 @@ func (p *PubSub) PeerScore(pr peer.ID) float64 {
 // Join joins the bitmasks and returns a set of Bitmask handles. Only one Bitmask
 // handle should exist per bit, and Join will error if all the Bitmask handles already exist.
 func (p *PubSub) Join(bitmask []byte, opts ...BitmaskOpt) ([]*Bitmask, error) {
-	ts, news, errs := p.tryJoin(bitmask, opts...)
+	ts, _, errs := p.tryJoin(bitmask, opts...)
 	if len(errs) != 0 {
 		return nil, errors.Join(errs...)
-	}
-
-	if !slices.Contains(news, true) {
-		return nil, fmt.Errorf("bitmask already exists")
 	}
 
 	return ts, nil
@@ -1449,11 +1469,6 @@ func (p *PubSub) GetBitmasks() []string {
 }
 
 func (p *PubSub) Publish(ctx context.Context, bitmask []byte, data []byte, opts ...PubOpt) error {
-	peers := p.ListPeers(bitmask)
-	if len(peers) == 0 {
-		return ErrBitmaskClosed
-	}
-
 	slices := SliceBitmask(bitmask)
 	o := rand.Intn(len(slices))
 	b, _, errs := p.tryJoin(slices[o])

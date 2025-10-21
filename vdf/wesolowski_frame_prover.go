@@ -55,6 +55,33 @@ func GetSetBitIndices(mask []byte) []uint8 {
 	return indices
 }
 
+func (w *WesolowskiFrameProver) CalculateMultiProof(
+	challenge [32]byte,
+	difficulty uint32,
+	ids [][]byte,
+	index uint32,
+) [516]byte {
+	return WesolowskiSolveMulti(challenge, difficulty, ids, index)
+}
+
+func (w *WesolowskiFrameProver) VerifyMultiProof(
+	challenge [32]byte,
+	difficulty uint32,
+	ids [][]byte,
+	allegedSolutions [][516]byte,
+) (bool, error) {
+	if len(ids) != len(allegedSolutions) || len(ids) == 0 {
+		return false, errors.New("invalid payload")
+	}
+
+	return WesolowskiVerifyMulti(
+		challenge,
+		difficulty,
+		ids,
+		allegedSolutions,
+	), nil
+}
+
 func (w *WesolowskiFrameProver) ProveFrameHeaderGenesis(
 	address []byte,
 	difficulty uint32,
@@ -347,8 +374,6 @@ func (w *WesolowskiFrameProver) ProveGlobalFrameHeader(
 	previousFrame *protobufs.GlobalFrameHeader,
 	commitments [][]byte,
 	proverRoot []byte,
-	stagedRoot []byte,
-	deploymentsRoot []byte,
 	provingKey qcrypto.Signer,
 	timestamp int64,
 	difficulty uint32,
@@ -385,8 +410,6 @@ func (w *WesolowskiFrameProver) ProveGlobalFrameHeader(
 	}
 
 	input = append(input, proverRoot...)
-	input = append(input, stagedRoot...)
-	input = append(input, deploymentsRoot...)
 
 	b := sha3.Sum256(input)
 	o := WesolowskiSolve(b, difficulty)
@@ -403,15 +426,13 @@ func (w *WesolowskiFrameProver) ProveGlobalFrameHeader(
 	}
 
 	header := &protobufs.GlobalFrameHeader{
-		FrameNumber:                      previousFrame.FrameNumber + 1,
-		Timestamp:                        timestamp,
-		Difficulty:                       difficulty,
-		Output:                           o[:],
-		ParentSelector:                   parent.FillBytes(make([]byte, 32)),
-		GlobalCommitments:                commitments,
-		GlobalProverTreeCommitment:       proverRoot,
-		GlobalProverTreeStagedCommitment: stagedRoot,
-		AppShardDeploymentsCommitment:    deploymentsRoot,
+		FrameNumber:          previousFrame.FrameNumber + 1,
+		Timestamp:            timestamp,
+		Difficulty:           difficulty,
+		Output:               o[:],
+		ParentSelector:       parent.FillBytes(make([]byte, 32)),
+		GlobalCommitments:    commitments,
+		ProverTreeCommitment: proverRoot,
 	}
 
 	switch pubkeyType {
@@ -467,9 +488,7 @@ func (w *WesolowskiFrameProver) GetGlobalFrameSignaturePayload(
 		input = append(input, commitment...)
 	}
 
-	input = append(input, frame.GlobalProverTreeCommitment...)
-	input = append(input, frame.GlobalProverTreeStagedCommitment...)
-	input = append(input, frame.AppShardDeploymentsCommitment...)
+	input = append(input, frame.ProverTreeCommitment...)
 
 	b := sha3.Sum256(input)
 	proof := [516]byte{}
@@ -518,26 +537,10 @@ func (w *WesolowskiFrameProver) VerifyGlobalFrameHeader(
 		}
 	}
 
-	if len(frame.GlobalProverTreeCommitment) != 74 &&
-		len(frame.GlobalProverTreeCommitment) != 64 {
+	if len(frame.ProverTreeCommitment) != 74 &&
+		len(frame.ProverTreeCommitment) != 64 {
 		return nil, errors.Wrap(
-			errors.New("invalid global commitment length"),
-			"verify global frame header",
-		)
-	}
-
-	if len(frame.GlobalProverTreeStagedCommitment) != 74 &&
-		len(frame.GlobalProverTreeStagedCommitment) != 64 {
-		return nil, errors.Wrap(
-			errors.New("invalid global commitment length"),
-			"verify global frame header",
-		)
-	}
-
-	if len(frame.AppShardDeploymentsCommitment) != 74 &&
-		len(frame.AppShardDeploymentsCommitment) != 64 {
-		return nil, errors.Wrap(
-			errors.New("invalid app shard commitment length"),
+			errors.New("invalid prover commitment length"),
 			"verify global frame header",
 		)
 	}

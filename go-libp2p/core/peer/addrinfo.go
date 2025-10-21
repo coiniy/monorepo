@@ -68,6 +68,10 @@ func IDFromP2PAddr(m ma.Multiaddr) (ID, error) {
 	}
 	var lastComponent ma.Component
 	ma.ForEach(m, func(c ma.Component, e error) bool {
+		if e != nil {
+			return false
+		}
+
 		lastComponent = c
 		return true
 	})

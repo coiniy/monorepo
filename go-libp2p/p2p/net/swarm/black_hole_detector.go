@@ -125,7 +125,7 @@ func (b *BlackHoleSuccessCounter) updateState() {
 	}
 
 	if st != b.state {
-		log.Debugf("%s blackHoleDetector state changed from %s to %s", b.Name, st, b.state)
+		log.Debug("blackHoleDetector state changed", "name", b.Name, "from", st, "to", b.state)
 	}
 }
 
@@ -184,7 +184,7 @@ type blackHoleDetector struct {
 func (d *blackHoleDetector) FilterAddrs(addrs []ma.Multiaddr) (valid []ma.Multiaddr, blackHoled []ma.Multiaddr) {
 	hasUDP, hasIPv6 := false, false
 	for _, a := range addrs {
-		if pubadd, err := manet.IsPublicAddr(a); !pubadd || err != nil {
+		if isPubAddr, err := manet.IsPublicAddr(a); !isPubAddr || err != nil {
 			continue
 		}
 		if isProtocolAddr(a, ma.P_UDP) {
@@ -211,7 +211,7 @@ func (d *blackHoleDetector) FilterAddrs(addrs []ma.Multiaddr) (valid []ma.Multia
 	return ma.FilterAddrs(
 		addrs,
 		func(a ma.Multiaddr) bool {
-			if pubadd, err := manet.IsPublicAddr(a); !pubadd || err != nil {
+			if isPubAddr, err := manet.IsPublicAddr(a); !isPubAddr || err != nil {
 				return true
 			}
 			// allow all UDP addresses while probing irrespective of IPv6 black hole state
@@ -238,7 +238,10 @@ func (d *blackHoleDetector) FilterAddrs(addrs []ma.Multiaddr) (valid []ma.Multia
 
 // RecordResult updates the state of the relevant BlackHoleSuccessCounters for addr
 func (d *blackHoleDetector) RecordResult(addr ma.Multiaddr, success bool) {
-	if pubadd, err := manet.IsPublicAddr(addr); !pubadd || err != nil || d.readOnly {
+	if d.readOnly {
+		return
+	}
+	if isPubAddr, err := manet.IsPublicAddr(addr); !isPubAddr || err != nil {
 		return
 	}
 	if d.udp != nil && isProtocolAddr(addr, ma.P_UDP) {

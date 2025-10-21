@@ -47,14 +47,14 @@ mint:Name a rdfs:Property ;
 `
 
 	parser := &TurtleRDFParser{}
-	
+
 	// Get tags using the new method
 	tags, err := parser.GetTags(rdfDocument)
 	require.NoError(t, err)
-	
+
 	// Verify we got the expected tags
 	assert.Len(t, tags, 4, "Expected 4 tags")
-	
+
 	// Check Quantity field
 	quantityTag := tags["Quantity"]
 	require.NotNil(t, quantityTag)
@@ -62,7 +62,7 @@ mint:Name a rdfs:Property ;
 	assert.Equal(t, 0, quantityTag.Order)
 	assert.Nil(t, quantityTag.Size) // Size is encoded in the type for uint
 	assert.Empty(t, quantityTag.Extrinsic)
-	
+
 	// Check DestinationAccount field
 	accountTag := tags["DestinationAccount"]
 	require.NotNil(t, accountTag)
@@ -70,7 +70,7 @@ mint:Name a rdfs:Property ;
 	assert.Equal(t, 1, accountTag.Order)
 	assert.Equal(t, "account:Account", accountTag.Extrinsic)
 	assert.Nil(t, accountTag.Size) // Extrinsic fields don't have size
-	
+
 	// Check Data field
 	dataTag := tags["Data"]
 	require.NotNil(t, dataTag)
@@ -79,7 +79,7 @@ mint:Name a rdfs:Property ;
 	require.NotNil(t, dataTag.Size)
 	assert.Equal(t, 128, *dataTag.Size)
 	assert.Empty(t, dataTag.Extrinsic)
-	
+
 	// Check Name field
 	nameTag := tags["Name"]
 	require.NotNil(t, nameTag)
@@ -88,17 +88,17 @@ mint:Name a rdfs:Property ;
 	require.NotNil(t, nameTag.Size)
 	assert.Equal(t, 64, *nameTag.Size)
 	assert.Empty(t, nameTag.Extrinsic)
-	
+
 	// Verify all tags can be parsed by ParseRDFTag
 	for fieldName, tag := range tags {
 		parsedTag, err := ParseRDFTag(tag.Raw)
 		require.NoError(t, err, "Failed to parse tag for field %s", fieldName)
-		
+
 		// Compare parsed tag with original
 		assert.Equal(t, tag.Name, parsedTag.Name, "Name mismatch for field %s", fieldName)
 		assert.Equal(t, tag.Order, parsedTag.Order, "Order mismatch for field %s", fieldName)
 		assert.Equal(t, tag.Extrinsic, parsedTag.Extrinsic, "Extrinsic mismatch for field %s", fieldName)
-		
+
 		if tag.Size != nil {
 			require.NotNil(t, parsedTag.Size, "Size should not be nil for field %s", fieldName)
 			assert.Equal(t, *tag.Size, *parsedTag.Size, "Size mismatch for field %s", fieldName)
@@ -150,16 +150,16 @@ mint:Name a rdfs:Property ;
 `
 
 	parser := &TurtleRDFParser{}
-	
+
 	// Generate QCL code
 	generated, err := parser.GenerateQCL(rdfDocument)
 	require.NoError(t, err)
-	
+
 	// Extract struct definition
 	lines := strings.Split(generated, "\n")
 	var structLines []string
 	inStruct := false
-	
+
 	for _, line := range lines {
 		if strings.HasPrefix(line, "type MintRequest struct") {
 			inStruct = true
@@ -172,46 +172,46 @@ mint:Name a rdfs:Property ;
 			structLines = append(structLines, strings.TrimSpace(line))
 		}
 	}
-	
+
 	// Parse each field's tag
 	type fieldInfo struct {
-		name     string
-		typ      string
-		tag      string
+		name      string
+		typ       string
+		tag       string
 		parsedTag *RDFTag
 	}
-	
+
 	var fields []fieldInfo
-	
+
 	for _, line := range structLines {
 		// Skip comment lines
 		if strings.HasPrefix(line, "//") {
 			continue
 		}
-		
+
 		// Parse field definition
 		// Format: FieldName Type `rdf:"..."`
 		parts := strings.Fields(line)
 		if len(parts) < 3 {
 			continue
 		}
-		
+
 		fieldName := parts[0]
 		fieldType := parts[1]
-		
+
 		// Extract tag
 		tagStart := strings.Index(line, "`rdf:\"")
 		tagEnd := strings.LastIndex(line, "\"`")
 		if tagStart == -1 || tagEnd == -1 {
 			continue
 		}
-		
+
 		tagValue := line[tagStart+6 : tagEnd]
-		
+
 		// Parse the tag using our tag parser
 		parsedTag, err := ParseRDFTag(tagValue)
 		require.NoError(t, err, "Failed to parse tag for field %s: %s", fieldName, tagValue)
-		
+
 		fields = append(fields, fieldInfo{
 			name:      fieldName,
 			typ:       fieldType,
@@ -219,10 +219,10 @@ mint:Name a rdfs:Property ;
 			parsedTag: parsedTag,
 		})
 	}
-	
+
 	// Verify we got all expected fields
 	assert.Len(t, fields, 5, "Expected 5 fields in generated struct")
-	
+
 	// Expected field configurations
 	expectedFields := map[string]struct {
 		typ       string
@@ -255,36 +255,36 @@ mint:Name a rdfs:Property ;
 			size:  intPtr(64),
 		},
 	}
-	
+
 	// Verify each field
 	for _, field := range fields {
 		expected, ok := expectedFields[field.name]
 		assert.True(t, ok, "Unexpected field: %s", field.name)
-		
+
 		// Check type
 		assert.Equal(t, expected.typ, field.typ, "Field %s type mismatch", field.name)
-		
+
 		// Check order
-		assert.Equal(t, expected.order, field.parsedTag.Order, 
+		assert.Equal(t, expected.order, field.parsedTag.Order,
 			"Field %s order mismatch. Tag: %s", field.name, field.tag)
-		
+
 		// Check size
 		if expected.size != nil {
-			require.NotNil(t, field.parsedTag.Size, 
+			require.NotNil(t, field.parsedTag.Size,
 				"Field %s expected size but got nil. Tag: %s", field.name, field.tag)
-			assert.Equal(t, *expected.size, *field.parsedTag.Size, 
+			assert.Equal(t, *expected.size, *field.parsedTag.Size,
 				"Field %s size mismatch. Tag: %s", field.name, field.tag)
 		} else {
-			assert.Nil(t, field.parsedTag.Size, 
-				"Field %s expected no size but got %v. Tag: %s", 
+			assert.Nil(t, field.parsedTag.Size,
+				"Field %s expected no size but got %v. Tag: %s",
 				field.name, field.parsedTag.Size, field.tag)
 		}
-		
+
 		// Check extrinsic
 		assert.Equal(t, expected.extrinsic, field.parsedTag.Extrinsic,
 			"Field %s extrinsic mismatch. Tag: %s", field.name, field.tag)
 	}
-	
+
 	// Verify the tags can be validated as a complete struct
 	// Create a mock struct type with the parsed tags
 	mockFields := make([]reflect.StructField, len(fields))
@@ -295,11 +295,11 @@ mint:Name a rdfs:Property ;
 			Tag:  reflect.StructTag(`rdf:"` + field.tag + `"`),
 		}
 	}
-	
+
 	mockStruct := reflect.StructOf(mockFields)
 	tags, err := ValidateStructTags(mockStruct)
 	require.NoError(t, err, "Generated tags should pass validation")
-	
+
 	// Verify field ordering
 	fieldOrder := GetFieldOrder(tags, mockStruct)
 	expectedOrder := []string{"Quantity", "DestinationAccount", "MintAuthorization", "Data", "Name"}
@@ -392,22 +392,22 @@ test:Reference a rdfs:Property ;
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			parser := &TurtleRDFParser{}
 			generated, err := parser.GenerateQCL(tt.rdfDocument)
-			
+
 			if tt.expectError {
 				assert.Error(t, err)
 				return
 			}
-			
+
 			require.NoError(t, err)
 			if tt.validate != nil {
 				tt.validate(t, generated)
 			}
-			
+
 			// Verify all tags in the generated code can be parsed
 			lines := strings.Split(generated, "\n")
 			for _, line := range lines {

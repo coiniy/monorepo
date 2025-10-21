@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"bytes"
 	"log"
 	"math/big"
 	"sort"
@@ -49,6 +50,11 @@ func GetBloomFilter(data []byte, bitLength int, k int) []byte {
 // GetBloomFilterIndices returns the indices of a bloom filter, in increasing
 // order, assuming bitLength is a multiple of 32 as in GetBloomFilter.
 func GetBloomFilterIndices(data []byte, bitLength int, k int) []byte {
+	// Shortcut: addresses out of poseidon field must index to 0x000000
+	if data[0] > 0x3f || bytes.Equal(data, bytes.Repeat([]byte{0x00}, 32)) {
+		return []byte{0x00, 0x00, 0x00}
+	}
+
 	size := big.NewInt(int64(bitLength)).BitLen() - 1
 	h := sha3.NewShake256()
 	_, err := h.Write(data)

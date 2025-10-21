@@ -88,18 +88,21 @@ type ProverRegistry interface {
 	GetOrderedProvers(input [32]byte, filter []byte) ([][]byte, error)
 
 	// GetActiveProvers returns all active provers for a given filter/shard. If
-	// filter is nil, returns global provers.
+	// filter is nil, returns global provers. List is lexicographically sorted.
 	GetActiveProvers(filter []byte) ([]*ProverInfo, error)
 
 	// GetProverCount returns the number of active provers for a filter/shard.
 	GetProverCount(filter []byte) (int, error)
+
+	// GetProvers returns all provers for a filter/shard
+	GetProvers(filter []byte) ([]*ProverInfo, error)
 
 	// GetProversByStatus returns all provers with a specific status for a
 	// filter/shard.
 	GetProversByStatus(filter []byte, status ProverStatus) ([]*ProverInfo, error)
 
 	// UpdateProverActivity updates the last active frame for a prover.
-	UpdateProverActivity(address []byte, frameNumber uint64) error
+	UpdateProverActivity(address []byte, filter []byte, frameNumber uint64) error
 
 	// Refresh re-reads the hypergraph state to update prover information. This is
 	// useful for periodic refreshes or after known state changes.

@@ -6,14 +6,15 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/assert"
@@ -22,7 +23,14 @@ import (
 
 // TestMutualAuth tests that we can do a mutually authenticated round trip
 func TestMutualAuth(t *testing.T) {
-	logging.SetLogLevel("httppeeridauth", "DEBUG")
+	originalLogger := log
+	defer func() {
+		log = originalLogger
+	}()
+	// Override to print debug logs
+	log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
 
 	zeroBytes := make([]byte, 64)
 	serverKey, _, err := crypto.GenerateEd25519Key(bytes.NewReader(zeroBytes))
@@ -250,7 +258,7 @@ func TestConcurrentAuth(t *testing.T) {
 		},
 		TokenTTL: time.Hour,
 		NoTLS:    true,
-		Next: func(peer peer.ID, w http.ResponseWriter, r *http.Request) {
+		Next: func(_ peer.ID, w http.ResponseWriter, r *http.Request) {
 			reqBody, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
 			_, err = w.Write(reqBody)

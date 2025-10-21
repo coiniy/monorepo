@@ -259,7 +259,7 @@ type StateMachine[
 	transitionCount                uint64
 	listeners                      []TransitionListener[StateT]
 	shouldEmitReceiveEventsOnSends bool
-	minimumProvers                 uint64
+	minimumProvers                 func() uint64
 
 	// Dependencies
 	syncProvider     SyncProvider[StateT]
@@ -328,7 +328,7 @@ func NewStateMachine[
 	id PeerIDT,
 	initialState *StateT,
 	shouldEmitReceiveEventsOnSends bool,
-	minimumProvers uint64,
+	minimumProvers func() uint64,
 	syncProvider SyncProvider[StateT],
 	votingProvider VotingProvider[StateT, VoteT, PeerIDT],
 	leaderProvider LeaderProvider[StateT, PeerIDT, CollectedT],
@@ -419,7 +419,7 @@ func (sm *StateMachine[
 					sm.mu.Lock()
 					sm.activeState = newState
 					sm.mu.Unlock()
-					nextLeaders, err := sm.leaderProvider.GetNextLeaders(data, ctx)
+					nextLeaders, err := sm.leaderProvider.GetNextLeaders(newState, ctx)
 					if err != nil {
 						sm.traceLogger.Error(
 							fmt.Sprintf("error encountered in %s", sm.machineState),
@@ -437,9 +437,11 @@ func (sm *StateMachine[
 					if found {
 						sm.SendEvent(EventSyncComplete)
 					} else {
+						time.Sleep(10 * time.Second)
 						sm.SendEvent(EventSyncTimeout)
 					}
 				case <-errCh:
+					time.Sleep(10 * time.Second)
 					sm.SendEvent(EventSyncTimeout)
 				case <-ctx.Done():
 					return
@@ -461,6 +463,7 @@ func (sm *StateMachine[
 					fmt.Sprintf("error encountered in %s", sm.machineState),
 					err,
 				)
+				sm.SendEvent(EventInduceSync)
 				return
 			}
 
@@ -476,6 +479,7 @@ func (sm *StateMachine[
 					fmt.Sprintf("error encountered in %s", sm.machineState),
 					err,
 				)
+				sm.SendEvent(EventInduceSync)
 				return
 			}
 
@@ -489,6 +493,7 @@ func (sm *StateMachine[
 					fmt.Sprintf("error encountered in %s", sm.machineState),
 					err,
 				)
+				sm.SendEvent(EventInduceSync)
 				return
 			}
 
@@ -507,8 +512,8 @@ func (sm *StateMachine[
 
 			sm.SendEvent(EventCollectionDone)
 		},
-		Timeout:   1 * time.Second,
-		OnTimeout: EventCollectionDone,
+		Timeout:   10 * time.Second,
+		OnTimeout: EventInduceSync,
 	}
 
 	// Liveness check state
@@ -521,7 +526,8 @@ func (sm *StateMachine[
 			sm.mu.Unlock()
 
 			// If we're not meeting the minimum prover count, we should loop.
-			if nextProversLen < int(sm.minimumProvers) {
+			if nextProversLen < int(sm.minimumProvers()) {
+				sm.traceLogger.Trace("insufficient provers, re-fetching leaders")
 				var err error
 				nextProvers, err := sm.leaderProvider.GetNextLeaders(data, ctx)
 				if err != nil {
@@ -529,6 +535,7 @@ func (sm *StateMachine[
 						fmt.Sprintf("error encountered in %s", sm.machineState),
 						err,
 					)
+					sm.SendEvent(EventInduceSync)
 					return
 				}
 				sm.mu.Lock()
@@ -545,17 +552,30 @@ func (sm *StateMachine[
 			sm.mu.Unlock()
 
 			// We have enough checks for consensus:
-			if livenessLen >= int(sm.minimumProvers) {
+			if livenessLen >= int(sm.minimumProvers()) {
+				sm.traceLogger.Trace(
+					"sufficient liveness checks, sending prover signal",
+				)
 				sm.SendEvent(EventProverSignal)
 				return
 			}
 
+			sm.traceLogger.Trace(
+				fmt.Sprintf(
+					"insufficient liveness checks: need %d, have %d",
+					sm.minimumProvers(),
+					livenessLen,
+				),
+			)
+
+			time.Sleep(100 * time.Millisecond)
 			err := sm.livenessProvider.SendLiveness(data, collected, ctx)
 			if err != nil {
 				sm.traceLogger.Error(
 					fmt.Sprintf("error encountered in %s", sm.machineState),
 					err,
 				)
+				sm.SendEvent(EventInduceSync)
 				return
 			}
 		},
@@ -570,9 +590,11 @@ func (sm *StateMachine[
 			defer sm.traceLogger.Trace("exit Proving behavior")
 			sm.mu.Lock()
 			collected := sm.collected
+			sm.collected = nil
 			sm.mu.Unlock()
 
 			if collected == nil {
+				sm.SendEvent(EventInduceSync)
 				return
 			}
 
@@ -587,6 +609,7 @@ func (sm *StateMachine[
 					err,
 				)
 
+				sm.SendEvent(EventInduceSync)
 				return
 			}
 
@@ -625,9 +648,12 @@ func (sm *StateMachine[
 						fmt.Sprintf("error encountered in %s", sm.machineState),
 						err,
 					)
+					sm.SendEvent(EventInduceSync)
 					return
 				}
 				sm.SendEvent(EventPublishComplete)
+			} else {
+				sm.mu.Unlock()
 			}
 		},
 		Timeout:   1 * time.Second,
@@ -644,6 +670,7 @@ func (sm *StateMachine[
 
 			if sm.chosenProposer == nil {
 				// We haven't voted yet
+				sm.traceLogger.Trace("proposer not yet chosen")
 				perfect := map[int]PeerIDT{} // all provers
 				live := map[int]PeerIDT{}    // the provers who told us they're alive
 				for i, p := range sm.nextProvers {
@@ -653,21 +680,31 @@ func (sm *StateMachine[
 					}
 				}
 
-				if len(sm.proposals[(*sm.activeState).Rank()+1]) < int(sm.minimumProvers) {
+				if len(sm.proposals[(*sm.activeState).Rank()+1]) < int(sm.minimumProvers()) {
+					sm.traceLogger.Trace(
+						fmt.Sprintf(
+							"insufficient proposal count: %d, need %d",
+							len(sm.proposals[(*sm.activeState).Rank()+1]),
+							int(sm.minimumProvers()),
+						),
+					)
 					sm.mu.Unlock()
 					return
 				}
 
 				if ctx == nil {
+					sm.traceLogger.Trace("context null")
 					sm.mu.Unlock()
 					return
 				}
 
 				select {
 				case <-ctx.Done():
+					sm.traceLogger.Trace("context canceled")
 					sm.mu.Unlock()
 					return
 				default:
+					sm.traceLogger.Trace("choosing proposal")
 					proposals := map[Identity]*StateT{}
 					for k, v := range sm.proposals[(*sm.activeState).Rank()+1] {
 						state := (*v).Clone().(StateT)
@@ -684,6 +721,7 @@ func (sm *StateMachine[
 							fmt.Sprintf("error encountered in %s", sm.machineState),
 							err,
 						)
+						sm.SendEvent(EventInduceSync)
 						break
 					}
 					sm.mu.Lock()
@@ -701,13 +739,14 @@ func (sm *StateMachine[
 					sm.mu.Unlock()
 				}
 			} else {
+				sm.traceLogger.Trace("proposal chosen, checking for quorum")
 				proposalVotes := map[Identity]*VoteT{}
 				for p, vp := range sm.votes[(*sm.activeState).Rank()+1] {
 					vclone := (*vp).Clone().(VoteT)
 					proposalVotes[p] = &vclone
 				}
 				haveEnoughProposals := len(sm.proposals[(*sm.activeState).Rank()+1]) >=
-					int(sm.minimumProvers)
+					int(sm.minimumProvers())
 				sm.mu.Unlock()
 				isQuorum, err := sm.votingProvider.IsQuorum(proposalVotes, ctx)
 				if err != nil {
@@ -715,11 +754,21 @@ func (sm *StateMachine[
 						fmt.Sprintf("error encountered in %s", sm.machineState),
 						err,
 					)
+					sm.SendEvent(EventInduceSync)
 					return
 				}
 
 				if isQuorum && haveEnoughProposals {
+					sm.traceLogger.Trace("quorum reached")
 					sm.SendEvent(EventQuorumReached)
+				} else {
+					sm.traceLogger.Trace(
+						fmt.Sprintf(
+							"quorum not reached: proposals: %d, needed: %d",
+							len(sm.proposals[(*sm.activeState).Rank()+1]),
+							sm.minimumProvers(),
+						),
+					)
 				}
 			}
 		},
@@ -752,6 +801,7 @@ func (sm *StateMachine[
 					fmt.Sprintf("error encountered in %s", sm.machineState),
 					err,
 				)
+				sm.SendEvent(EventInduceSync)
 				return
 			}
 			next := (*finalized).Clone().(StateT)
@@ -780,6 +830,8 @@ func (sm *StateMachine[
 						fmt.Sprintf("error encountered in %s", sm.machineState),
 						err,
 					)
+					sm.SendEvent(EventInduceSync)
+					return
 				}
 				sm.mu.Lock()
 			}
@@ -1199,7 +1251,13 @@ func (sm *StateMachine[
 	PeerIDT,
 	CollectedT,
 ]) ReceiveLivenessCheck(peer PeerIDT, collected CollectedT) error {
-	sm.traceLogger.Trace("enter receivelivenesscheck")
+	sm.traceLogger.Trace(
+		fmt.Sprintf(
+			"enter receivelivenesscheck, peer: %s, rank: %d",
+			peer.Identity(),
+			collected.Rank(),
+		),
+	)
 	defer sm.traceLogger.Trace("exit receivelivenesscheck")
 	sm.mu.Lock()
 	if _, ok := sm.liveness[collected.Rank()]; !ok {
@@ -1253,7 +1311,8 @@ func (sm *StateMachine[
 	}
 	if _, ok := sm.votes[(*vote).Rank()][voter.Identity()]; !ok {
 		sm.votes[(*vote).Rank()][voter.Identity()] = vote
-	} else if sm.votes[(*vote).Rank()][voter.Identity()] != vote {
+	} else if (*sm.votes[(*vote).Rank()][voter.Identity()]).Identity() !=
+		(*vote).Identity() {
 		sm.mu.Unlock()
 		return errors.Wrap(errors.New("received conflicting vote"), "receive vote")
 	}

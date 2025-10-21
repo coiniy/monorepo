@@ -1,13 +1,71 @@
 package mocks
 
 import (
+	"context"
+	"io"
 	"math/big"
 
 	"github.com/stretchr/testify/mock"
+	"source.quilibrium.com/quilibrium/monorepo/protobufs"
 	"source.quilibrium.com/quilibrium/monorepo/types/crypto"
 	hg "source.quilibrium.com/quilibrium/monorepo/types/hypergraph"
+	"source.quilibrium.com/quilibrium/monorepo/types/store"
 	"source.quilibrium.com/quilibrium/monorepo/types/tries"
 )
+
+type MockTransaction struct {
+	mock.Mock
+}
+
+// Abort implements store.Transaction.
+func (m *MockTransaction) Abort() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+// Commit implements store.Transaction.
+func (m *MockTransaction) Commit() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+// Delete implements store.Transaction.
+func (m *MockTransaction) Delete(key []byte) error {
+	args := m.Called(key)
+	return args.Error(0)
+}
+
+// DeleteRange implements store.Transaction.
+func (m *MockTransaction) DeleteRange(
+	lowerBound []byte,
+	upperBound []byte,
+) error {
+	args := m.Called(lowerBound, upperBound)
+	return args.Error(0)
+}
+
+// Get implements store.Transaction.
+func (m *MockTransaction) Get(key []byte) ([]byte, io.Closer, error) {
+	args := m.Called(key)
+	return args.Get(0).([]byte), args.Get(1).(io.Closer), args.Error(2)
+}
+
+// NewIter implements store.Transaction.
+func (m *MockTransaction) NewIter(
+	lowerBound []byte,
+	upperBound []byte,
+) (store.Iterator, error) {
+	args := m.Called(lowerBound, upperBound)
+	return args.Get(0).(store.Iterator), args.Error(1)
+}
+
+// Set implements store.Transaction.
+func (m *MockTransaction) Set(key []byte, value []byte) error {
+	args := m.Called(key, value)
+	return args.Error(0)
+}
+
+var _ store.Transaction = (*MockTransaction)(nil)
 
 // MockHyperedge mocks the Vertex implementation for testing
 type MockVertex struct {
@@ -119,7 +177,104 @@ func (m *MockHyperedge) ToBytes() []byte {
 
 // MockHypergraph mocks the Hypergraph implementation for testing
 type MockHypergraph struct {
+	protobufs.HypergraphComparisonServiceServer
 	mock.Mock
+}
+
+// GetChildrenForPath implements hypergraph.Hypergraph.
+func (h *MockHypergraph) GetChildrenForPath(
+	context context.Context,
+	req *protobufs.GetChildrenForPathRequest,
+) (*protobufs.GetChildrenForPathResponse, error) {
+	args := h.Called(context, req)
+	return args.Get(0).(*protobufs.GetChildrenForPathResponse), args.Error(1)
+}
+
+// GetMetadataAtKey implements hypergraph.Hypergraph.
+func (h *MockHypergraph) GetMetadataAtKey(pathKey []byte) (
+	[]hg.ShardMetadata,
+	error,
+) {
+	args := h.Called(pathKey)
+	return args.Get(0).([]hg.ShardMetadata), args.Error(1)
+}
+
+// HyperStream implements hypergraph.Hypergraph.
+func (h *MockHypergraph) HyperStream(
+	server protobufs.HypergraphComparisonService_HyperStreamServer,
+) error {
+	args := h.Called(server)
+	return args.Error(0)
+}
+
+// Sync implements hypergraph.Hypergraph.
+func (h *MockHypergraph) Sync(
+	stream protobufs.HypergraphComparisonService_HyperStreamClient,
+	shardKey tries.ShardKey,
+	phaseSet protobufs.HypergraphPhaseSet,
+) error {
+	args := h.Called(stream, shardKey, phaseSet)
+	return args.Error(0)
+}
+
+// RunDataPruning implements hypergraph.Hypergraph.
+func (h *MockHypergraph) RunDataPruning(
+	txn tries.TreeBackingStoreTransaction,
+	frameNumber uint64,
+) error {
+	args := h.Called(txn, frameNumber)
+	return args.Error(0)
+}
+
+// SetCoveredPrefix implements hypergraph.Hypergraph.
+func (h *MockHypergraph) SetCoveredPrefix(prefix []int) error {
+	args := h.Called(prefix)
+	return args.Error(0)
+}
+
+// RevertChanges implements hypergraph.Hypergraph.
+func (h *MockHypergraph) RevertChanges(
+	txn tries.TreeBackingStoreTransaction,
+	frameStart uint64,
+	frameEnd uint64,
+	shardKey tries.ShardKey,
+) error {
+	args := h.Called(txn, frameStart, frameEnd, shardKey)
+	return args.Error(0)
+}
+
+// GetChanges implements hypergraph.Hypergraph.
+func (h *MockHypergraph) GetChanges(
+	frameStart uint64,
+	frameEnd uint64,
+	phaseType string,
+	setType string,
+	shardKey tries.ShardKey,
+) ([]*tries.ChangeRecord, error) {
+	args := h.Called(frameStart, frameEnd, phaseType, setType, shardKey)
+	return args.Get(0).([]*tries.ChangeRecord), args.Error(1)
+}
+
+// TrackChange implements hypergraph.Hypergraph.
+func (h *MockHypergraph) TrackChange(
+	txn tries.TreeBackingStoreTransaction,
+	key []byte,
+	oldValue *tries.VectorCommitmentTree,
+	frameNumber uint64,
+	phaseType string,
+	setType string,
+	shardKey tries.ShardKey,
+) error {
+	args := h.Called(
+		txn,
+		key,
+		oldValue,
+		frameNumber,
+		phaseType,
+		setType,
+		shardKey,
+	)
+	return args.Error(0)
 }
 
 // GetVertexDataIterator implements hypergraph.Hypergraph.
@@ -167,16 +322,6 @@ func (h *MockHypergraph) GetProver() crypto.InclusionProver {
 	return args.Get(0).(crypto.InclusionProver)
 }
 
-// MarkVertexDataForDeletion implements hypergraph.Hypergraph.
-func (h *MockHypergraph) MarkVertexDataForDeletion(
-	txn tries.TreeBackingStoreTransaction,
-	deleteAt int64,
-	id [64]byte,
-) error {
-	args := h.Called(txn, deleteAt, id)
-	return args.Error(0)
-}
-
 // NewTransaction implements hypergraph.Hypergraph.
 func (h *MockHypergraph) NewTransaction(indexed bool) (
 	tries.TreeBackingStoreTransaction,
@@ -184,14 +329,6 @@ func (h *MockHypergraph) NewTransaction(indexed bool) (
 ) {
 	args := h.Called(indexed)
 	return args.Get(0).(tries.TreeBackingStoreTransaction), args.Error(1)
-}
-
-// RunVertexDataPruning implements hypergraph.Hypergraph.
-func (h *MockHypergraph) RunVertexDataPruning(
-	txn tries.TreeBackingStoreTransaction,
-) error {
-	args := h.Called(txn)
-	return args.Error(0)
 }
 
 // SetVertexData implements hypergraph.Hypergraph.
@@ -204,26 +341,16 @@ func (h *MockHypergraph) SetVertexData(
 	return args.Error(0)
 }
 
-// UnmarkVertexDataForDeletion implements hypergraph.Hypergraph.
-func (h *MockHypergraph) UnmarkVertexDataForDeletion(
-	txn tries.TreeBackingStoreTransaction,
-	deleteAt int64,
-	id [64]byte,
-) error {
-	args := h.Called(txn, deleteAt, id)
-	return args.Error(0)
-}
-
 // GetSize implements the interface
-func (h *MockHypergraph) GetSize() *big.Int {
-	args := h.Called()
+func (h *MockHypergraph) GetSize(key *tries.ShardKey, path []int) *big.Int {
+	args := h.Called(key, path)
 	return args.Get(0).(*big.Int)
 }
 
 // Commit implements the interface
-func (h *MockHypergraph) Commit() [][]byte {
+func (h *MockHypergraph) Commit() map[tries.ShardKey][][]byte {
 	args := h.Called()
-	return args.Get(0).([][]byte)
+	return args.Get(0).(map[tries.ShardKey][][]byte)
 }
 
 // GetVertex implements the interface
@@ -358,28 +485,34 @@ func (h *MockHypergraph) Within(a, he hg.Atom) bool {
 	return args.Bool(0)
 }
 
-// GetVertexAdds implements the interface
-func (h *MockHypergraph) GetVertexAdds() map[tries.ShardKey]*hg.IdSet {
-	args := h.Called()
-	return args.Get(0).(map[tries.ShardKey]*hg.IdSet)
+// GetVertexAddsSet implements the interface
+func (h *MockHypergraph) GetVertexAddsSet(shardKey tries.ShardKey) hg.IdSet {
+	args := h.Called(shardKey)
+	return args.Get(0).(hg.IdSet)
 }
 
-// GetVertexRemoves implements the interface
-func (h *MockHypergraph) GetVertexRemoves() map[tries.ShardKey]*hg.IdSet {
-	args := h.Called()
-	return args.Get(0).(map[tries.ShardKey]*hg.IdSet)
+// GetVertexRemovesSet implements the interface
+func (h *MockHypergraph) GetVertexRemovesSet(
+	shardKey tries.ShardKey,
+) hg.IdSet {
+	args := h.Called(shardKey)
+	return args.Get(0).(hg.IdSet)
 }
 
-// GetHyperedgeAdds implements the interface
-func (h *MockHypergraph) GetHyperedgeAdds() map[tries.ShardKey]*hg.IdSet {
-	args := h.Called()
-	return args.Get(0).(map[tries.ShardKey]*hg.IdSet)
+// GetHyperedgeAddsSet implements the interface
+func (h *MockHypergraph) GetHyperedgeAddsSet(
+	shardKey tries.ShardKey,
+) hg.IdSet {
+	args := h.Called(shardKey)
+	return args.Get(0).(hg.IdSet)
 }
 
-// GetHyperedgeRemoves implements the interface
-func (h *MockHypergraph) GetHyperedgeRemoves() map[tries.ShardKey]*hg.IdSet {
-	args := h.Called()
-	return args.Get(0).(map[tries.ShardKey]*hg.IdSet)
+// GetHyperedgeRemovesSet implements the interface
+func (h *MockHypergraph) GetHyperedgeRemovesSet(
+	shardKey tries.ShardKey,
+) hg.IdSet {
+	args := h.Called(shardKey)
+	return args.Get(0).(hg.IdSet)
 }
 
 // ImportTree implements the interface

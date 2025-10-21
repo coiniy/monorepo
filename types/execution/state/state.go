@@ -20,11 +20,8 @@ type Iterator interface {
 }
 
 type MaterializedState interface {
-	ToBytes() ([]byte, error)
-	FromBytes(data []byte) error
 	DataValue() *tries.VectorCommitmentTree
 	Commit(txn tries.TreeBackingStoreTransaction) error
-	Revert(txn tries.TreeBackingStoreTransaction) error
 }
 
 type StateChangeEvent uint8
@@ -49,7 +46,6 @@ type StateChange struct {
 	Discriminator []byte
 	StateChange   StateChangeEvent
 	Value         MaterializedState
-	PreviousValue MaterializedState
 }
 
 type State interface {
@@ -59,6 +55,7 @@ type State interface {
 		sumcheckInfo *tries.VectorCommitmentTree,
 		rdfSchema string,
 		additionalData []*tries.VectorCommitmentTree,
+		intrinsicType []byte,
 	) error
 	Get(domain []byte, address []byte, discriminator []byte) (
 		interface{},
@@ -68,11 +65,16 @@ type State interface {
 		domain []byte,
 		address []byte,
 		discriminator []byte,
+		frameNumber uint64,
 		value MaterializedState,
 	) error
-	Delete(domain []byte, address []byte, discriminator []byte) error
+	Delete(
+		domain []byte,
+		address []byte,
+		discriminator []byte,
+		frameNumber uint64,
+	) error
 	Changeset() []StateChange
 	Commit() error
 	Abort() error
-	Revert() error
 }

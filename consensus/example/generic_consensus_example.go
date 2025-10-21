@@ -697,7 +697,7 @@ func newConsensusNodeWithBehavior(
 		PeerID{ID: nodeID},
 		initialData,
 		true,
-		3,
+		func() uint64 { return uint64(3) },
 		syncProvider,
 		votingProvider,
 		leaderProvider,

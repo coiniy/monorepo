@@ -211,6 +211,7 @@ func TestAllAddrs(t *testing.T) {
 	// no listen addrs
 	h, err := NewHost(swarmt.GenSwarm(t, swarmt.OptDialOnly), nil)
 	require.NoError(t, err)
+	h.Start()
 	defer h.Close()
 	require.Nil(t, h.AllAddrs())
 
@@ -223,6 +224,7 @@ func TestAllAddrs(t *testing.T) {
 
 	// listen on IPv4 0.0.0.0
 	require.NoError(t, h.Network().Listen(tStringCast("/ip4/0.0.0.0/tcp/0")))
+
 	// should contain localhost and private local addr along with previous listen address
 	require.Len(t, h.AllAddrs(), 3)
 	// Should still contain the original addr.
@@ -735,7 +737,7 @@ func TestHostAddrChangeDetection(t *testing.T) {
 		lk.Lock()
 		currentAddrSet = i
 		lk.Unlock()
-		h.addressManager.triggerAddrsUpdate()
+		h.addressManager.updateAddrsSync()
 		evt := waitForAddrChangeEvent(ctx, sub, t)
 		if !updatedAddrEventsEqual(expectedEvents[i-1], evt) {
 			t.Errorf("change events not equal: \n\texpected: %v \n\tactual: %v", expectedEvents[i-1], evt)
@@ -865,14 +867,6 @@ func peerRecordFromEnvelope(t *testing.T, ev *record.Envelope) *peer.PeerRecord 
 		return nil
 	}
 	return peerRec
-}
-
-func TestNormalizeMultiaddr(t *testing.T) {
-	h1, err := NewHost(swarmt.GenSwarm(t), nil)
-	require.NoError(t, err)
-	defer h1.Close()
-
-	require.Equal(t, "/ip4/1.2.3.4/udp/9999/quic-v1/webtransport", h1.NormalizeMultiaddr(tStringCast("/ip4/1.2.3.4/udp/9999/quic-v1/webtransport/certhash/uEgNmb28")).String())
 }
 
 func TestTrimHostAddrList(t *testing.T) {

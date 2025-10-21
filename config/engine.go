@@ -127,18 +127,20 @@ type EngineConfig struct {
 	ArchiveMode bool `yaml:"archiveMode"`
 	// Delegate address for rewards (hexadecimal string without 0x prefix)
 	DelegateAddress string `yaml:"delegateAddress"`
+	// Whether to allow GOMAXPROCS values above the number of physical cores.
+	AllowExcessiveGOMAXPROCS bool `yaml:"allowExcessiveGOMAXPROCS"`
+	// Blacklisted addresses
+	Blacklist []string `yaml:"blacklist"`
+	// Alert public key
+	AlertKey string `yaml:"alertKey"`
 
 	// Values used only for testing – do not override these in production, your
 	// node will get kicked out
 	Difficulty uint32
-	// Whether to allow GOMAXPROCS values above the number of physical cores.
-	AllowExcessiveGOMAXPROCS bool `yaml:"allowExcessiveGOMAXPROCS"`
 	// Hypergraph rebuild range start
 	RebuildStart string
 	// Hypergraph rebuild range end
 	RebuildEnd string
-	// Blacklisted addresses
-	Blacklist []string `yaml:"blacklist"`
 
 	// EXPERIMENTAL: The configuration for frame publishing.
 	FramePublish FramePublishConfig `yaml:"framePublish"`
@@ -180,6 +182,9 @@ func (c EngineConfig) WithDefaults() EngineConfig {
 	cpy.FramePublish = cpy.FramePublish.WithDefaults()
 	if cpy.Blacklist == nil {
 		cpy.Blacklist = []string{}
+	}
+	if cpy.AlertKey == "" {
+		cpy.AlertKey = "3ade80f96515e34caaf0c346b842d1f82d2841840f27e12826f4c14326a6bd15d13796c0421f8c440809fceb66c0a5c3c88f93deae16ee3100"
 	}
 	return cpy
 }
