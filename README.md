@@ -1,5 +1,7 @@
 # Quilibrium - 2.1 - Bloom
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/coiniy/monorepo)
+
 ## Quick Start
 
 Running production nodes from source is no longer recommended given build
