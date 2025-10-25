@@ -7,7 +7,6 @@ import (
 	"source.quilibrium.com/quilibrium/monorepo/config"
 	"source.quilibrium.com/quilibrium/monorepo/node/consensus/events"
 	"source.quilibrium.com/quilibrium/monorepo/node/consensus/time"
-	qp2p "source.quilibrium.com/quilibrium/monorepo/node/p2p"
 	"source.quilibrium.com/quilibrium/monorepo/types/channel"
 	"source.quilibrium.com/quilibrium/monorepo/types/compiler"
 	"source.quilibrium.com/quilibrium/monorepo/types/consensus"
@@ -29,6 +28,7 @@ type AppConsensusEngineFactory struct {
 	keyStore             store.KeyStore
 	clockStore           store.ClockStore
 	inboxStore           store.InboxStore
+	shardsStore          store.ShardsStore
 	hypergraphStore      store.HypergraphStore
 	frameProver          crypto.FrameProver
 	inclusionProver      crypto.InclusionProver
@@ -38,7 +38,7 @@ type AppConsensusEngineFactory struct {
 	compiler             compiler.CircuitCompiler
 	signerRegistry       consensus.SignerRegistry
 	proverRegistry       consensus.ProverRegistry
-	peerInfoManager      qp2p.PeerInfoManager
+	peerInfoManager      p2p.PeerInfoManager
 	dynamicFeeManager    consensus.DynamicFeeManager
 	frameValidator       consensus.AppFrameValidator
 	globalFrameValidator consensus.GlobalFrameValidator
@@ -58,6 +58,7 @@ func NewAppConsensusEngineFactory(
 	keyStore store.KeyStore,
 	clockStore store.ClockStore,
 	inboxStore store.InboxStore,
+	shardsStore store.ShardsStore,
 	hypergraphStore store.HypergraphStore,
 	frameProver crypto.FrameProver,
 	inclusionProver crypto.InclusionProver,
@@ -67,7 +68,7 @@ func NewAppConsensusEngineFactory(
 	compiler compiler.CircuitCompiler,
 	signerRegistry consensus.SignerRegistry,
 	proverRegistry consensus.ProverRegistry,
-	peerInfoManager qp2p.PeerInfoManager,
+	peerInfoManager p2p.PeerInfoManager,
 	dynamicFeeManager consensus.DynamicFeeManager,
 	frameValidator consensus.AppFrameValidator,
 	globalFrameValidator consensus.GlobalFrameValidator,
@@ -85,6 +86,7 @@ func NewAppConsensusEngineFactory(
 		keyStore:             keyStore,
 		clockStore:           clockStore,
 		inboxStore:           inboxStore,
+		shardsStore:          shardsStore,
 		hypergraphStore:      hypergraphStore,
 		frameProver:          frameProver,
 		inclusionProver:      inclusionProver,
@@ -141,6 +143,7 @@ func (f *AppConsensusEngineFactory) CreateAppConsensusEngine(
 		f.keyStore,
 		f.clockStore,
 		f.inboxStore,
+		f.shardsStore,
 		f.hypergraphStore,
 		f.frameProver,
 		f.inclusionProver,

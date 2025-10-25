@@ -20,6 +20,7 @@ import (
 	"source.quilibrium.com/quilibrium/monorepo/types/channel"
 	"source.quilibrium.com/quilibrium/monorepo/types/consensus"
 	"source.quilibrium.com/quilibrium/monorepo/types/crypto"
+	tp2p "source.quilibrium.com/quilibrium/monorepo/types/p2p"
 )
 
 type DataWorkerIPCServer struct {
@@ -33,7 +34,7 @@ type DataWorkerIPCServer struct {
 	signer                    crypto.Signer
 	signerRegistry            consensus.SignerRegistry
 	proverRegistry            consensus.ProverRegistry
-	peerInfoManager           p2p.PeerInfoManager
+	peerInfoManager           tp2p.PeerInfoManager
 	authProvider              channel.AuthenticationProvider
 	appConsensusEngineFactory *app.AppConsensusEngineFactory
 	appConsensusEngine        *app.AppConsensusEngine
@@ -47,7 +48,7 @@ func NewDataWorkerIPCServer(
 	config *config.Config,
 	signerRegistry consensus.SignerRegistry,
 	proverRegistry consensus.ProverRegistry,
-	peerInfoManager p2p.PeerInfoManager,
+	peerInfoManager tp2p.PeerInfoManager,
 	frameProver crypto.FrameProver,
 	appConsensusEngineFactory *app.AppConsensusEngineFactory,
 	logger *zap.Logger,
@@ -103,6 +104,7 @@ func (r *DataWorkerIPCServer) Start() error {
 }
 
 func (r *DataWorkerIPCServer) Stop() error {
+	r.logger.Info("stopping server gracefully")
 	r.server.GracefulStop()
 	go func() {
 		r.quit <- struct{}{}
@@ -171,6 +173,8 @@ func (r *DataWorkerIPCServer) RespawnServer(filter []byte) error {
 	}
 	r.server = qgrpc.NewServer(
 		grpc.Creds(tlsCreds),
+		grpc.ChainUnaryInterceptor(r.authProvider.UnaryInterceptor),
+		grpc.ChainStreamInterceptor(r.authProvider.StreamInterceptor),
 		grpc.MaxRecvMsgSize(10*1024*1024),
 		grpc.MaxSendMsgSize(10*1024*1024),
 	)

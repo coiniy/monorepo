@@ -36,6 +36,7 @@ import (
 	"source.quilibrium.com/quilibrium/monorepo/node/execution/intrinsics/global/compat"
 	"source.quilibrium.com/quilibrium/monorepo/node/execution/manager"
 	hgstate "source.quilibrium.com/quilibrium/monorepo/node/execution/state/hypergraph"
+	qgrpc "source.quilibrium.com/quilibrium/monorepo/node/internal/grpc"
 	"source.quilibrium.com/quilibrium/monorepo/node/keys"
 	"source.quilibrium.com/quilibrium/monorepo/node/p2p"
 	"source.quilibrium.com/quilibrium/monorepo/node/p2p/onion"
@@ -109,7 +110,7 @@ type GlobalConsensusEngine struct {
 	executorsMu        sync.RWMutex
 	executionManager   *manager.ExecutionEngineManager
 	mixnet             typesconsensus.Mixnet
-	peerInfoManager    p2p.PeerInfoManager
+	peerInfoManager    tp2p.PeerInfoManager
 	workerManager      worker.WorkerManager
 	proposer           *provers.Manager
 	alertPublicKey     []byte
@@ -219,7 +220,7 @@ func NewGlobalConsensusEngine(
 	decafConstructor crypto.DecafConstructor,
 	compiler compiler.CircuitCompiler,
 	blsConstructor crypto.BlsConstructor,
-	peerInfoManager p2p.PeerInfoManager,
+	peerInfoManager tp2p.PeerInfoManager,
 ) (*GlobalConsensusEngine, error) {
 	engine := &GlobalConsensusEngine{
 		logger:                      logger,
@@ -296,7 +297,7 @@ func NewGlobalConsensusEngine(
 				return 6
 			}
 
-			return uint64(len(currentSet))
+			return uint64(len(currentSet)) * 2 / 3
 		}
 	}
 
@@ -390,6 +391,9 @@ func NewGlobalConsensusEngine(
 		decafConstructor,
 		compiler,
 		frameProver,
+		rewardIssuance,
+		proverRegistry,
+		blsConstructor,
 		true, // includeGlobal
 	)
 	if err != nil {
@@ -535,6 +539,7 @@ func (e *GlobalConsensusEngine) Start(quit chan struct{}) <-chan error {
 		return errChan
 	}
 
+	// Subscribe to shard consensus messages to broker lock agreement
 	err = e.subscribeToShardConsensusMessages()
 	if err != nil {
 		errChan <- errors.Wrap(err, "start")
@@ -574,6 +579,8 @@ func (e *GlobalConsensusEngine) Start(quit chan struct{}) <-chan error {
 		return errChan
 	}
 
+	e.peerInfoManager.Start()
+
 	// Start consensus message queue processor
 	e.wg.Add(1)
 	go e.processGlobalConsensusMessageQueue()
@@ -609,6 +616,10 @@ func (e *GlobalConsensusEngine) Start(quit chan struct{}) <-chan error {
 	// Start periodic metrics update
 	e.wg.Add(1)
 	go e.updateMetrics()
+
+	// Start periodic tx lock pruning
+	e.wg.Add(1)
+	go e.pruneTxLocksPeriodically()
 
 	if e.config.P2P.Network == 99 || e.config.Engine.ArchiveMode {
 		// Start the state machine
@@ -687,6 +698,7 @@ func (e *GlobalConsensusEngine) setupGRPCServer() error {
 			"quilibrium.node.global.pb.GlobalService":                    channel.AnyPeer,
 			"quilibrium.node.global.pb.OnionService":                     channel.AnyPeer,
 			"quilibrium.node.global.pb.KeyRegistryService":               channel.OnlySelfPeer,
+			"quilibrium.node.proxy.pb.PubSubProxy":                       channel.OnlySelfPeer,
 		},
 		map[string]channel.AllowedPeerPolicyType{
 			// Alternative nodes may not need to make this only self peer, but this
@@ -710,8 +722,10 @@ func (e *GlobalConsensusEngine) setupGRPCServer() error {
 	}
 
 	// Create gRPC server with TLS
-	e.grpcServer = grpc.NewServer(
+	e.grpcServer = qgrpc.NewServer(
 		grpc.Creds(tlsCreds),
+		grpc.ChainUnaryInterceptor(e.authProvider.UnaryInterceptor),
+		grpc.ChainStreamInterceptor(e.authProvider.StreamInterceptor),
 		grpc.MaxRecvMsgSize(10*1024*1024),
 		grpc.MaxSendMsgSize(10*1024*1024),
 	)
@@ -803,6 +817,8 @@ func (e *GlobalConsensusEngine) Stop(force bool) <-chan error {
 	e.pubsub.UnregisterValidator(GLOBAL_PEER_INFO_BITMASK)
 	e.pubsub.Unsubscribe(GLOBAL_ALERT_BITMASK, false)
 	e.pubsub.UnregisterValidator(GLOBAL_ALERT_BITMASK)
+
+	e.peerInfoManager.Stop()
 
 	// Wait for goroutines to finish
 	done := make(chan struct{})
@@ -1883,6 +1899,74 @@ func (e *GlobalConsensusEngine) reportPeerInfoPeriodically() {
 				)
 			}
 		}
+	}
+}
+
+func (e *GlobalConsensusEngine) pruneTxLocksPeriodically() {
+	defer e.wg.Done()
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	e.pruneTxLocks()
+
+	for {
+		select {
+		case <-e.ctx.Done():
+			return
+		case <-ticker.C:
+			e.pruneTxLocks()
+		}
+	}
+}
+
+func (e *GlobalConsensusEngine) pruneTxLocks() {
+	e.txLockMu.RLock()
+	if len(e.txLockMap) == 0 {
+		e.txLockMu.RUnlock()
+		return
+	}
+	e.txLockMu.RUnlock()
+
+	frame, err := e.clockStore.GetLatestGlobalClockFrame()
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			e.logger.Debug(
+				"failed to load latest global frame for tx lock pruning",
+				zap.Error(err),
+			)
+		}
+		return
+	}
+
+	if frame == nil || frame.Header == nil {
+		return
+	}
+
+	head := frame.Header.FrameNumber
+	if head < 2 {
+		return
+	}
+
+	cutoff := head - 2
+
+	e.txLockMu.Lock()
+	removed := 0
+	for frameNumber := range e.txLockMap {
+		if frameNumber < cutoff {
+			delete(e.txLockMap, frameNumber)
+			removed++
+		}
+	}
+	e.txLockMu.Unlock()
+
+	if removed > 0 {
+		e.logger.Debug(
+			"pruned stale tx locks",
+			zap.Uint64("head_frame", head),
+			zap.Uint64("cutoff_frame", cutoff),
+			zap.Int("frames_removed", removed),
+		)
 	}
 }
 

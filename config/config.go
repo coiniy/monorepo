@@ -44,6 +44,7 @@ type Config struct {
 	P2P                 *P2PConfig    `yaml:"p2p"`
 	Engine              *EngineConfig `yaml:"engine"`
 	DB                  *DBConfig     `yaml:"db"`
+	Logger              *LogConfig    `yaml:"logger"`
 	ListenGRPCMultiaddr string        `yaml:"listenGrpcMultiaddr"`
 	ListenRestMultiaddr string        `yaml:"listenRESTMultiaddr"`
 	LogFile             string        `yaml:"logFile"`
@@ -445,7 +446,7 @@ type setter struct {
 	ver    string
 }
 
-func (s setter) String() string { return *s.dst }
+func (s setter) String() string { return "" }
 func (s setter) Set(_ string) error {
 	*s.dst = s.value
 	*s.dstver = s.ver

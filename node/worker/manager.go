@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -519,6 +520,10 @@ func (w *WorkerManager) loadWorkersFromStore() error {
 				continue
 			}
 		}
+		workers, err = w.store.RangeWorkers()
+		if err != nil {
+			return errors.Wrap(err, "load workers from store")
+		}
 	}
 
 	var totalStorage uint64
@@ -738,10 +743,10 @@ func (w *WorkerManager) spawnDataWorkers() {
 
 func (w *WorkerManager) stopDataWorkers() {
 	for i := 0; i < len(w.dataWorkers); i++ {
-		err := w.dataWorkers[i].Process.Signal(os.Kill)
+		err := w.dataWorkers[i].Process.Signal(syscall.SIGTERM)
 		if err != nil {
 			w.logger.Info(
-				"unable to kill worker",
+				"unable to stop worker",
 				zap.Int("pid", w.dataWorkers[i].Process.Pid),
 				zap.Error(err),
 			)

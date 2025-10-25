@@ -1,16 +1,12 @@
 package global
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
-	"io"
 	"math/big"
-	"net/http"
 	"slices"
 	"time"
 
@@ -45,6 +41,18 @@ type GenesisJson struct {
 	ArchivePeers       map[string]string `json:"archive_peers"`
 }
 
+//go:embed mainnet_genesis.json
+var mainnetGenesisJSON []byte
+
+func (e *GlobalConsensusEngine) getMainnetGenesisJSON() *GenesisJson {
+	genesisData := &GenesisJson{}
+	if err := json.Unmarshal(mainnetGenesisJSON, genesisData); err != nil {
+		e.logger.Error("failed to parse embedded genesis data", zap.Error(err))
+		return nil
+	}
+	return genesisData
+}
+
 // TODO[2.1.1+]: Refactor out direct hypergraph access
 func (e *GlobalConsensusEngine) initializeGenesis() *protobufs.GlobalFrame {
 	e.logger.Info("initializing genesis frame for global consensus")
@@ -53,43 +61,8 @@ func (e *GlobalConsensusEngine) initializeGenesis() *protobufs.GlobalFrame {
 
 	// If on mainnet, load from release
 	if e.config.P2P.Network == 0 {
-		var lastErr error
-		var genesisData GenesisJson = GenesisJson{}
-		for attempt := 1; attempt <= 5; attempt++ {
-			if err := func() error {
-				resp, err := http.Get("https://releases.quilibrium.com/genesis.json")
-				if err != nil {
-					return err
-				}
-				defer resp.Body.Close()
-
-				if resp.StatusCode != http.StatusOK {
-					return fmt.Errorf("http status %d", resp.StatusCode)
-				}
-
-				buf := bytes.NewBuffer(nil)
-				_, err = io.Copy(buf, resp.Body)
-				if err != nil {
-					return err
-				}
-
-				err = json.Unmarshal(buf.Bytes(), &genesisData)
-				if err != nil {
-					return err
-				}
-
-				return nil
-			}(); err != nil {
-				lastErr = err
-				// simple backoff: 200ms * attempt
-				time.Sleep(time.Duration(200*attempt) * time.Millisecond)
-				continue
-			}
-			lastErr = nil
-			break
-		}
-		if lastErr != nil {
-			e.logger.Error("failed to download genesis", zap.Error(lastErr))
+		genesisData := e.getMainnetGenesisJSON()
+		if genesisData == nil {
 			return nil
 		}
 
@@ -129,7 +102,7 @@ func (e *GlobalConsensusEngine) initializeGenesis() *protobufs.GlobalFrame {
 			commitments[i] = &tries.VectorCommitmentTree{}
 		}
 
-		proverRoot := make([]byte, 64)
+		var proverRoot []byte
 
 		// Parse and set initial commitments from JSON
 		for hexKey, base64Value := range genesisData.InitialCommitments {
@@ -205,7 +178,12 @@ func (e *GlobalConsensusEngine) initializeGenesis() *protobufs.GlobalFrame {
 			return nil
 		}
 
-		roots := e.hypergraph.Commit()
+		roots, err := e.hypergraph.Commit(0)
+		if err != nil {
+			e.logger.Error("could not commit", zap.Error(err))
+			return nil
+		}
+
 		proverRoots := roots[tries.ShardKey{
 			L1: [3]byte{},
 			L2: intrinsics.GLOBAL_INTRINSIC_ADDRESS,
@@ -416,20 +394,6 @@ func (e *GlobalConsensusEngine) createStubGenesis() *protobufs.GlobalFrame {
 		return nil
 	}
 
-	roots := e.hypergraph.Commit()
-
-	// Parse and set initial commitments from JSON
-	for shardKey, commits := range roots {
-		for i := 0; i < 3; i++ {
-			commitments[shardKey.L1[i]].Insert(
-				shardKey.L2[:],
-				commits[0],
-				nil,
-				big.NewInt(int64(len(commits[0]))),
-			)
-			commitments[shardKey.L1[i]].Commit(e.inclusionProver, false)
-		}
-	}
 	state = hgstate.NewHypergraphState(e.hypergraph)
 
 	for _, pubkey := range proverPubKeys {
@@ -446,7 +410,25 @@ func (e *GlobalConsensusEngine) createStubGenesis() *protobufs.GlobalFrame {
 		return nil
 	}
 
-	roots = e.hypergraph.Commit()
+	roots, err := e.hypergraph.Commit(0)
+	if err != nil {
+		e.logger.Error("could not commit", zap.Error(err))
+		return nil
+	}
+
+	// Parse and set initial commitments from JSON
+	for shardKey, commits := range roots {
+		for i := 0; i < 3; i++ {
+			commitments[shardKey.L1[i]].Insert(
+				shardKey.L2[:],
+				commits[0],
+				nil,
+				big.NewInt(int64(len(commits[0]))),
+			)
+			commitments[shardKey.L1[i]].Commit(e.inclusionProver, false)
+		}
+	}
+
 	proverRoots := roots[tries.ShardKey{
 		L1: [3]byte{},
 		L2: intrinsics.GLOBAL_INTRINSIC_ADDRESS,
@@ -499,7 +481,7 @@ func (e *GlobalConsensusEngine) createStubGenesis() *protobufs.GlobalFrame {
 
 func (e *GlobalConsensusEngine) establishMainnetGenesisProvers(
 	state *hgstate.HypergraphState,
-	genesisData GenesisJson,
+	genesisData *GenesisJson,
 ) error {
 	rdfMultiprover := schema.NewRDFMultiprover(
 		&schema.TurtleRDFParser{},
