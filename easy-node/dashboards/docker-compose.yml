@@ -1,0 +1,43 @@
+version: "3.7"
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    environment:
+      - NO_PROXY=*
+      - no_proxy=*
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - quilibrium-monitor
+
+  grafana:
+    image: grafana/grafana:latest
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./dashboard.yml:/etc/grafana/provisioning/dashboards/main.yml
+      - ./datasources.yml:/etc/grafana/provisioning/datasources/prom.yml
+      - ./01-overview.json:/var/lib/grafana/dashboards/01-overview.json
+      - ./node-monitoring.json:/var/lib/grafana/dashboards/02-node-monitoring.json
+      - ./prover-registry.json:/var/lib/grafana/dashboards/03-prover-registry.json
+      - ./worker/worker-manager.json:/var/lib/grafana/dashboards/04-worker-manager.json
+      - ./05-hypergraph.json:/var/lib/grafana/dashboards/05-hypergraph.json
+      - ./06-global-consensus.json:/var/lib/grafana/dashboards/06-global-consensus.json
+      - ./07-blossomsub-network.json:/var/lib/grafana/dashboards/07-blossomsub-network.json
+      - ./nodes-table-overview.json:/var/lib/grafana/dashboards/08-nodes-table-overview.json
+    networks:
+      - quilibrium-monitor
+
+networks:
+  quilibrium-monitor:
+    driver: bridge

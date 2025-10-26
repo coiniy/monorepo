@@ -183,6 +183,19 @@ func (s *NodeService) GetNextAvailableBasePort() (int, error) {
 func (s *NodeService) GetNextAvailableSortNo() (int, error) {
 	ctx := context.Background()
 
+	// 检查Redis中是否已经有计数器，如果没有则初始化为0
+	exists, err := s.redis.Exists(ctx, RedisSortNoKey).Result()
+	if err != nil {
+		return 0, fmt.Errorf("failed to check Redis key existence: %w", err)
+	}
+
+	if exists == 0 {
+		// 初始化为0，这样第一次INCR会返回1
+		if err := s.redis.Set(ctx, RedisSortNoKey, 0, 0).Err(); err != nil {
+			return 0, fmt.Errorf("failed to initialize sortNo counter in Redis: %w", err)
+		}
+	}
+
 	// 使用Redis INCR命令原子递增
 	sortNo, err := s.redis.Incr(ctx, RedisSortNoKey).Result()
 	if err != nil {
@@ -192,30 +205,12 @@ func (s *NodeService) GetNextAvailableSortNo() (int, error) {
 	return int(sortNo), nil
 }
 
-// InitializeSortNoCounter 初始化Redis中的sortNo计数器（从数据库的最大值开始）
+// InitializeSortNoCounter 初始化Redis中的sortNo计数器为0
 func (s *NodeService) InitializeSortNoCounter() error {
 	ctx := context.Background()
 
-	// 检查Redis中是否已经有计数器
-	exists, err := s.redis.Exists(ctx, RedisSortNoKey).Result()
-	if err != nil {
-		return fmt.Errorf("failed to check Redis key existence: %w", err)
-	}
-
-	// 如果计数器已存在，不需要初始化
-	if exists > 0 {
-		return nil
-	}
-
-	// 从数据库获取当前最大的sortNo
-	var maxSortNo int
-	err = s.db.Model(&model.Node{}).Select("COALESCE(MAX(sort_no), 0)").Scan(&maxSortNo).Error
-	if err != nil {
-		return fmt.Errorf("failed to get max sort_no: %w", err)
-	}
-
-	// 设置Redis计数器为当前最大值
-	if err := s.redis.Set(ctx, RedisSortNoKey, maxSortNo, 0).Err(); err != nil {
+	// 初始化Redis计数器为0，这样第一次INCR会返回1
+	if err := s.redis.Set(ctx, RedisSortNoKey, 0, 0).Err(); err != nil {
 		return fmt.Errorf("failed to initialize sortNo counter in Redis: %w", err)
 	}
 

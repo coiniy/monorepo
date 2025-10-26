@@ -618,7 +618,7 @@ func (h *NodeHandler) CheckAllNodesHealth(c *gin.Context) {
 // 批量创建节点
 func (h *NodeHandler) BatchCreateNodes(c *gin.Context) {
 	var req struct {
-		Count      int    `json:"count" binding:"required,min=1,max=100"`
+		Count      int    `json:"count" binding:"required,min=1,max=1000"`
 		NamePrefix string `json:"name_prefix" binding:"required"`
 		StartPort  int    `json:"start_port" binding:"required,min=1024,max=65000"`
 		Enabled    bool   `json:"enabled"`
