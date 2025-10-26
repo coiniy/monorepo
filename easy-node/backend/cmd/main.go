@@ -4,6 +4,7 @@ import (
 	"easy-node-backend/internal/config"
 	"easy-node-backend/internal/db"
 	"easy-node-backend/internal/handler"
+	redisClient "easy-node-backend/internal/redis"
 	"easy-node-backend/internal/service"
 	"log"
 	"time"
@@ -27,7 +28,19 @@ func main() {
 		log.Fatal("Failed to initialize database:", err)
 	}
 
-	nodeService := service.NewNodeService(database)
+	// 初始化 Redis
+	redis, err := redisClient.InitRedis(cfg)
+	if err != nil {
+		log.Fatal("Failed to initialize Redis:", err)
+	}
+
+	nodeService := service.NewNodeService(database, redis)
+
+	// 初始化 sortNo 计数器
+	if err := nodeService.InitializeSortNoCounter(); err != nil {
+		zap.L().Warn("Failed to initialize sortNo counter", zap.Error(err))
+	}
+
 	dockerService := service.NewDockerService(database, cfg)
 	
 	// 初始化健康检查服务（暂时去掉Docker依赖）
@@ -53,6 +66,7 @@ func main() {
 			// 节点信息管理
 			nodes.GET("", nodeHandler.GetNodes)
 			nodes.POST("", nodeHandler.CreateNode)
+			nodes.POST("/batch-create", nodeHandler.BatchCreateNodes)
 			nodes.POST("/upload", nodeHandler.CreateNodeFromConfig)
 			nodes.POST("/batch-upload", nodeHandler.BatchUploadNodes)
 			nodes.PUT("/:id", nodeHandler.UpdateNode)

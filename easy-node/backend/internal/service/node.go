@@ -1,17 +1,28 @@
 package service
 
 import (
+	"context"
 	"easy-node-backend/internal/model"
 	"fmt"
+
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
+const (
+	RedisSortNoKey = "quilibrium:node:sortno:counter"
+)
+
 type NodeService struct {
-	db *gorm.DB
+	db    *gorm.DB
+	redis *redis.Client
 }
 
-func NewNodeService(db *gorm.DB) *NodeService {
-	return &NodeService{db: db}
+func NewNodeService(db *gorm.DB, redisClient *redis.Client) *NodeService {
+	return &NodeService{
+		db:    db,
+		redis: redisClient,
+	}
 }
 
 func (s *NodeService) GetAllNodes() ([]model.Node, error) {
@@ -148,10 +159,10 @@ func (s *NodeService) GetNextAvailableBasePort() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to get max base_port: %w", err)
 	}
-	
+
 	// 下一个可用端口，每个节点间隔10个端口
 	nextPort := maxPort + 10
-	
+
 	// 确保端口没有被使用
 	for {
 		var count int64
@@ -164,6 +175,49 @@ func (s *NodeService) GetNextAvailableBasePort() (int, error) {
 		}
 		nextPort += 10
 	}
-	
+
 	return nextPort, nil
+}
+
+// GetNextAvailableSortNo 获取下一个可用的排序号（使用Redis原子递增）
+func (s *NodeService) GetNextAvailableSortNo() (int, error) {
+	ctx := context.Background()
+
+	// 使用Redis INCR命令原子递增
+	sortNo, err := s.redis.Incr(ctx, RedisSortNoKey).Result()
+	if err != nil {
+		return 0, fmt.Errorf("failed to increment sortNo in Redis: %w", err)
+	}
+
+	return int(sortNo), nil
+}
+
+// InitializeSortNoCounter 初始化Redis中的sortNo计数器（从数据库的最大值开始）
+func (s *NodeService) InitializeSortNoCounter() error {
+	ctx := context.Background()
+
+	// 检查Redis中是否已经有计数器
+	exists, err := s.redis.Exists(ctx, RedisSortNoKey).Result()
+	if err != nil {
+		return fmt.Errorf("failed to check Redis key existence: %w", err)
+	}
+
+	// 如果计数器已存在，不需要初始化
+	if exists > 0 {
+		return nil
+	}
+
+	// 从数据库获取当前最大的sortNo
+	var maxSortNo int
+	err = s.db.Model(&model.Node{}).Select("COALESCE(MAX(sort_no), 0)").Scan(&maxSortNo).Error
+	if err != nil {
+		return fmt.Errorf("failed to get max sort_no: %w", err)
+	}
+
+	// 设置Redis计数器为当前最大值
+	if err := s.redis.Set(ctx, RedisSortNoKey, maxSortNo, 0).Err(); err != nil {
+		return fmt.Errorf("failed to initialize sortNo counter in Redis: %w", err)
+	}
+
+	return nil
 }

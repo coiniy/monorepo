@@ -1,0 +1,46 @@
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: easyweb3-postgres
+    environment:
+      POSTGRES_USER: easyweb3
+      POSTGRES_PASSWORD: easyweb3_dev_password
+      POSTGRES_DB: easyweb3
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U easyweb3"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - easyweb3-network
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: easyweb3-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - easyweb3-network
+
+
+networks:
+  easyweb3-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  gateway_cache:

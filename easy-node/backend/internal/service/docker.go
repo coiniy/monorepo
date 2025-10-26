@@ -25,7 +25,7 @@ func NewDockerService(db *gorm.DB, config *config.Config) *DockerService {
 
 func (s *DockerService) GenerateDockerCompose() error {
 	var nodes []model.Node
-	if err := s.db.Where("enabled = ?", true).Find(&nodes).Error; err != nil {
+	if err := s.db.Where("enabled = ?", true).Order("sort_no ASC").Find(&nodes).Error; err != nil {
 		return fmt.Errorf("failed to get nodes: %w", err)
 	}
 
@@ -38,11 +38,11 @@ func (s *DockerService) GenerateDockerCompose() error {
 
 services:
 {{- range .Nodes}}
-  node{{.ID}}:
+  node{{.SortNo}}:
     build: .
-    container_name: quilibrium-node-{{.ID}}
+    container_name: quilibrium-node-{{.SortNo}}
     volumes:
-      - ./node{{.ID}}-config:/root/.config
+      - ./node{{.SortNo}}-config:/root/.config
     ports:
       - "{{.BasePort}}:8340"
       - "{{add .BasePort 1}}:8336"
@@ -60,7 +60,7 @@ services:
           memory: 4G
 {{end}}
   envoy:
-    image: envoyproxy/envoy:v1.28-latest
+    image: envoyproxy/envoy:v1.31-latest
     container_name: quilibrium-envoy
     ports:
       - "8340:8340"
@@ -71,7 +71,7 @@ services:
     restart: always
     depends_on:
 {{- range .Nodes}}
-      - node{{.ID}}
+      - node{{.SortNo}}
 {{- end}}
 
 networks:
@@ -109,6 +109,11 @@ networks:
 	// 生成 Envoy 配置文件
 	if err := s.generateEnvoyConfig(nodes); err != nil {
 		return fmt.Errorf("failed to generate Envoy config: %w", err)
+	}
+
+	// 生成 Prometheus 配置文件
+	if err := s.generatePrometheusConfig(nodes); err != nil {
+		return fmt.Errorf("failed to generate Prometheus config: %w", err)
 	}
 
 	return nil
@@ -158,7 +163,7 @@ static_resources:
 {{- range .Nodes}}
         - endpoint:
             address:
-              socket_address: { address: node{{.ID}}, port_value: 8340 }
+              socket_address: { address: node{{.SortNo}}, port_value: 8340 }
 {{- end}}
 
   # UDP cluster for port 8336 (QUIC)
@@ -173,7 +178,7 @@ static_resources:
 {{- range .Nodes}}
         - endpoint:
             address:
-              socket_address: { address: node{{.ID}}, port_value: 8336 }
+              socket_address: { address: node{{.SortNo}}, port_value: 8336 }
 {{- end}}`
 
 	t, err := template.New("envoy").Parse(envoyTmpl)
@@ -205,8 +210,8 @@ static_resources:
 
 func (s *DockerService) generateNodeConfigs(nodes []model.Node) error {
 	for _, node := range nodes {
-		// 创建节点配置目录
-		nodeConfigDir := filepath.Join(s.config.Docker.DeploymentPath, fmt.Sprintf("node%d-config", node.ID))
+		// 创建节点配置目录 (使用 sortNo)
+		nodeConfigDir := filepath.Join(s.config.Docker.DeploymentPath, fmt.Sprintf("node%d-config", node.SortNo))
 		if err := os.MkdirAll(nodeConfigDir, 0755); err != nil {
 			return fmt.Errorf("failed to create node config directory: %w", err)
 		}
@@ -214,13 +219,13 @@ func (s *DockerService) generateNodeConfigs(nodes []model.Node) error {
 		// 生成 config.yml
 		configPath := filepath.Join(nodeConfigDir, "config.yml")
 		if err := s.writeFile(configPath, node.ConfigYml); err != nil {
-			return fmt.Errorf("failed to write config.yml for node %d: %w", node.ID, err)
+			return fmt.Errorf("failed to write config.yml for node %d: %w", node.SortNo, err)
 		}
 
 		// 生成 keys.yml
 		keysPath := filepath.Join(nodeConfigDir, "keys.yml")
 		if err := s.writeFile(keysPath, node.KeysYml); err != nil {
-			return fmt.Errorf("failed to write keys.yml for node %d: %w", node.ID, err)
+			return fmt.Errorf("failed to write keys.yml for node %d: %w", node.SortNo, err)
 		}
 	}
 	return nil
@@ -235,4 +240,91 @@ func (s *DockerService) writeFile(filePath, content string) error {
 
 	_, err = file.WriteString(content)
 	return err
+}
+
+func (s *DockerService) generatePrometheusConfig(nodes []model.Node) error {
+	promTmpl := `global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+  - scheme: http
+    timeout: 10s
+    api_version: v2
+    static_configs:
+    - targets: []
+
+scrape_configs:
+- job_name: prometheus
+  honor_timestamps: true
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  metrics_path: /metrics
+  scheme: http
+  static_configs:
+  - targets:
+    - localhost:9090
+
+- job_name: quilibrium_nodes
+  honor_timestamps: true
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  metrics_path: /metrics
+  scheme: http
+  static_configs:
+{{- range .Nodes}}
+  - targets:
+    - host.docker.internal:{{add .BasePort 4}}
+    labels:
+      node_name: "node-{{.SortNo}}"
+      container_name: "quilibrium-node-{{.SortNo}}"
+      sort_no: "{{.SortNo}}"
+{{- end}}
+
+- job_name: envoy_proxy
+  honor_timestamps: true
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  metrics_path: /stats/prometheus
+  scheme: http
+  static_configs:
+  - targets:
+    - host.docker.internal:9901
+    labels:
+      service: "envoy-load-balancer"
+`
+
+	funcMap := template.FuncMap{
+		"add": func(a, b int) int {
+			return a + b
+		},
+	}
+
+	t, err := template.New("prometheus").Funcs(funcMap).Parse(promTmpl)
+	if err != nil {
+		return fmt.Errorf("failed to parse Prometheus template: %w", err)
+	}
+
+	// 获取 dashboards 目录
+	prometheusConfigPath := filepath.Join(filepath.Dir(s.config.Docker.DeploymentPath), "dashboards", "prometheus.yml")
+
+	file, err := os.Create(prometheusConfigPath)
+	if err != nil {
+		return fmt.Errorf("failed to create Prometheus config file: %w", err)
+	}
+	defer file.Close()
+
+	data := struct {
+		Nodes []model.Node
+	}{
+		Nodes: nodes,
+	}
+
+	if err := t.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute Prometheus template: %w", err)
+	}
+
+	return nil
 }

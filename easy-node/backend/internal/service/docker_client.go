@@ -9,6 +9,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"go.uber.org/zap"
 )
@@ -145,21 +146,21 @@ func (s *DockerClientService) StartComposeProject(projectName string) error {
 	defer cancel()
 
 	// 获取项目的所有容器
+	filterArgs := filters.NewArgs()
+	filterArgs.Add("label", fmt.Sprintf("com.docker.compose.project=%s", projectName))
 	containers, err := s.client.ContainerList(ctx, types.ContainerListOptions{
-		All: true,
-		Filters: map[string][]string{
-			"label": {fmt.Sprintf("com.docker.compose.project=%s", projectName)},
-		},
+		All:     true,
+		Filters: filterArgs,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to list project containers: %w", err)
 	}
 
 	// 启动所有容器
-	for _, container := range containers {
-		if container.State != "running" {
-			if err := s.client.ContainerStart(ctx, container.ID, types.ContainerStartOptions{}); err != nil {
-				zap.L().Error("Failed to start container", zap.String("container", container.Names[0]), zap.Error(err))
+	for _, ctr := range containers {
+		if ctr.State != "running" {
+			if err := s.client.ContainerStart(ctx, ctr.ID, types.ContainerStartOptions{}); err != nil {
+				zap.L().Error("Failed to start container", zap.String("container", ctr.Names[0]), zap.Error(err))
 			}
 		}
 	}
@@ -174,11 +175,11 @@ func (s *DockerClientService) StopComposeProject(projectName string) error {
 	defer cancel()
 
 	// 获取项目的所有容器
+	filterArgs := filters.NewArgs()
+	filterArgs.Add("label", fmt.Sprintf("com.docker.compose.project=%s", projectName))
 	containers, err := s.client.ContainerList(ctx, types.ContainerListOptions{
-		All: true,
-		Filters: map[string][]string{
-			"label": {fmt.Sprintf("com.docker.compose.project=%s", projectName)},
-		},
+		All:     true,
+		Filters: filterArgs,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to list project containers: %w", err)
@@ -186,10 +187,10 @@ func (s *DockerClientService) StopComposeProject(projectName string) error {
 
 	// 停止所有容器
 	timeout := 30
-	for _, container := range containers {
-		if container.State == "running" {
-			if err := s.client.ContainerStop(ctx, container.ID, container.StopOptions{Timeout: &timeout}); err != nil {
-				zap.L().Error("Failed to stop container", zap.String("container", container.Names[0]), zap.Error(err))
+	for _, ctr := range containers {
+		if ctr.State == "running" {
+			if err := s.client.ContainerStop(ctx, ctr.ID, container.StopOptions{Timeout: &timeout}); err != nil {
+				zap.L().Error("Failed to stop container", zap.String("container", ctr.Names[0]), zap.Error(err))
 			}
 		}
 	}
@@ -224,21 +225,21 @@ func (s *DockerClientService) GetAllNodeStatus(projectName string) (map[string]s
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	filterArgs := filters.NewArgs()
+	filterArgs.Add("label", fmt.Sprintf("com.docker.compose.project=%s", projectName))
 	containers, err := s.client.ContainerList(ctx, types.ContainerListOptions{
-		All: true,
-		Filters: map[string][]string{
-			"label": {fmt.Sprintf("com.docker.compose.project=%s", projectName)},
-		},
+		All:     true,
+		Filters: filterArgs,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
 
 	statusMap := make(map[string]string)
-	for _, container := range containers {
-		if len(container.Names) > 0 {
-			name := strings.TrimPrefix(container.Names[0], "/")
-			statusMap[name] = container.State
+	for _, ctr := range containers {
+		if len(ctr.Names) > 0 {
+			name := strings.TrimPrefix(ctr.Names[0], "/")
+			statusMap[name] = ctr.State
 		}
 	}
 

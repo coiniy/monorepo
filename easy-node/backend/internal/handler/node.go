@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -177,7 +178,7 @@ func (h *NodeHandler) CreateNodeFromConfig(c *gin.Context) {
 	node := &model.Node{
 		Name:      nodeRequest.Name,
 		BasePort:  nodeRequest.BasePort,
-		PeerKey:   config.PeerPrivKey,
+		PeerKey:   config.GetPeerPrivKey(),
 		ConfigYml: string(configData),
 		KeysYml:   string(keysData),
 		Enabled:   true,
@@ -209,7 +210,7 @@ func (h *NodeHandler) readUploadedFile(header *multipart.FileHeader) ([]byte, er
 }
 
 func (h *NodeHandler) BatchUploadNodes(c *gin.Context) {
-	file, header, err := c.Request.FormFile("zip")
+	file, _, err := c.Request.FormFile("zip")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to get zip file"})
 		return
@@ -269,7 +270,7 @@ func (h *NodeHandler) BatchUploadNodes(c *gin.Context) {
 		// 创建或更新节点
 		node := &model.Node{
 			Name:      nodeConfig.FolderName,
-			PeerKey:   config.PeerPrivKey,
+			PeerKey:   config.GetPeerPrivKey(),
 			ConfigYml: string(nodeConfig.ConfigYml),
 			KeysYml:   string(nodeConfig.KeysYml),
 			Enabled:   true,
@@ -286,6 +287,19 @@ func (h *NodeHandler) BatchUploadNodes(c *gin.Context) {
 				continue
 			}
 			node.BasePort = basePort
+		}
+
+		// 检查 SortNo 是否需要分配
+		if node.SortNo == 0 {
+			sortNo, err := h.nodeService.GetNextAvailableSortNo()
+			if err != nil {
+				result["status"] = "error"
+				result["error"] = "Failed to allocate sort number: " + err.Error()
+				errorCount++
+				results = append(results, result)
+				continue
+			}
+			node.SortNo = sortNo
 		}
 
 		if err := h.nodeService.UpsertNodeByPeerKey(node); err != nil {
@@ -329,7 +343,6 @@ func (h *NodeHandler) GetNodesStatus(c *gin.Context) {
 
 	// 获取容器状态
 	var containerStatus map[string]string
-	var err error
 	if h.dockerClientService != nil {
 		containerStatus, err = h.dockerClientService.GetAllNodeStatus("easy-node")
 		if err != nil {
@@ -341,7 +354,7 @@ func (h *NodeHandler) GetNodesStatus(c *gin.Context) {
 		// 模拟容器状态
 		containerStatus = make(map[string]string)
 		for _, node := range nodes {
-			containerName := fmt.Sprintf("quilibrium-node-%d", node.ID)
+			containerName := fmt.Sprintf("quilibrium-node-%d", node.SortNo)
 			containerStatus[containerName] = "running"
 		}
 	}
@@ -349,7 +362,7 @@ func (h *NodeHandler) GetNodesStatus(c *gin.Context) {
 	// 合并节点信息和容器状态
 	var nodeStatus []map[string]interface{}
 	for _, node := range nodes {
-		containerName := fmt.Sprintf("quilibrium-node-%d", node.ID)
+		containerName := fmt.Sprintf("quilibrium-node-%d", node.SortNo)
 		status := "unknown"
 		if containerStatus[containerName] != "" {
 			status = containerStatus[containerName]
@@ -358,6 +371,7 @@ func (h *NodeHandler) GetNodesStatus(c *gin.Context) {
 		nodeStatus = append(nodeStatus, map[string]interface{}{
 			"id":              node.ID,
 			"name":            node.Name,
+			"sort_no":         node.SortNo,
 			"container_name":  containerName,
 			"container_status": status,
 			"base_port":       node.BasePort,
@@ -384,7 +398,7 @@ func (h *NodeHandler) StartNode(c *gin.Context) {
 		return
 	}
 
-	containerName := fmt.Sprintf("quilibrium-node-%d", node.ID)
+	containerName := fmt.Sprintf("quilibrium-node-%d", node.SortNo)
 	if h.dockerClientService != nil {
 		if err := h.dockerClientService.StartContainer(containerName); err != nil {
 			zap.L().Error("Failed to start container", zap.Error(err))
@@ -415,7 +429,7 @@ func (h *NodeHandler) StopNode(c *gin.Context) {
 		return
 	}
 
-	containerName := fmt.Sprintf("quilibrium-node-%d", node.ID)
+	containerName := fmt.Sprintf("quilibrium-node-%d", node.SortNo)
 	if h.dockerClientService != nil {
 		if err := h.dockerClientService.StopContainer(containerName); err != nil {
 			zap.L().Error("Failed to stop container", zap.Error(err))
@@ -446,7 +460,7 @@ func (h *NodeHandler) RestartNode(c *gin.Context) {
 		return
 	}
 
-	containerName := fmt.Sprintf("quilibrium-node-%d", node.ID)
+	containerName := fmt.Sprintf("quilibrium-node-%d", node.SortNo)
 	if h.dockerClientService != nil {
 		if err := h.dockerClientService.RestartContainer(containerName); err != nil {
 			zap.L().Error("Failed to restart container", zap.Error(err))
@@ -485,9 +499,8 @@ func (h *NodeHandler) GetNodeLogs(c *gin.Context) {
 		}
 	}
 
-	containerName := fmt.Sprintf("quilibrium-node-%d", node.ID)
+	containerName := fmt.Sprintf("quilibrium-node-%d", node.SortNo)
 	var logs string
-	var err error
 	if h.dockerClientService != nil {
 		logs, err = h.dockerClientService.GetContainerLogs(containerName, lines)
 		if err != nil {
@@ -599,5 +612,125 @@ func (h *NodeHandler) CheckAllNodesHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"nodes": healthInfos,
 		"total": len(healthInfos),
+	})
+}
+
+// 批量创建节点
+func (h *NodeHandler) BatchCreateNodes(c *gin.Context) {
+	var req struct {
+		Count      int    `json:"count" binding:"required,min=1,max=100"`
+		NamePrefix string `json:"name_prefix" binding:"required"`
+		StartPort  int    `json:"start_port" binding:"required,min=1024,max=65000"`
+		Enabled    bool   `json:"enabled"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 验证端口范围不会超出
+	if req.StartPort+(req.Count*5) > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Port range exceeds maximum (65535)"})
+		return
+	}
+
+	// 批量创建节点
+	results := make([]map[string]interface{}, 0)
+	successCount := 0
+	errorCount := 0
+
+	for i := 0; i < req.Count; i++ {
+		result := map[string]interface{}{
+			"index": i + 1,
+			"name":  fmt.Sprintf("%s-%d", req.NamePrefix, i+1),
+		}
+
+		// 为每个节点获取新的 sortNo（Redis 原子递增）
+		sortNo, err := h.nodeService.GetNextAvailableSortNo()
+		if err != nil {
+			result["status"] = "error"
+			result["error"] = "Failed to get next sort number: " + err.Error()
+			errorCount++
+			results = append(results, result)
+			continue
+		}
+
+		// 生成密钥
+		peerPrivKey, err := service.GeneratePeerPrivKey()
+		if err != nil {
+			result["status"] = "error"
+			result["error"] = "Failed to generate peer private key: " + err.Error()
+			errorCount++
+			results = append(results, result)
+			continue
+		}
+
+		encryptionKey, err := service.GenerateEncryptionKey()
+		if err != nil {
+			result["status"] = "error"
+			result["error"] = "Failed to generate encryption key: " + err.Error()
+			errorCount++
+			results = append(results, result)
+			continue
+		}
+
+		// 生成默认配置
+		configYml := service.GenerateDefaultConfigYml(peerPrivKey, encryptionKey)
+		keysYml := service.GenerateDefaultKeysYml()
+
+		// 创建节点
+		node := &model.Node{
+			Name:      fmt.Sprintf("%s-%d", req.NamePrefix, i+1),
+			SortNo:    sortNo,
+			BasePort:  req.StartPort + (i * 5),
+			PeerKey:   peerPrivKey,
+			ConfigYml: configYml,
+			KeysYml:   keysYml,
+			Enabled:   req.Enabled,
+		}
+
+		if err := h.nodeService.CreateNode(node); err != nil {
+			result["status"] = "error"
+			result["error"] = err.Error()
+			errorCount++
+		} else {
+			result["status"] = "success"
+			result["node_id"] = node.ID
+			result["sort_no"] = node.SortNo
+			result["base_port"] = node.BasePort
+			successCount++
+		}
+
+		results = append(results, result)
+	}
+
+	// 重新生成 Docker Compose 配置
+	if successCount > 0 {
+		if err := h.dockerService.GenerateDockerCompose(); err != nil {
+			zap.L().Error("Failed to generate docker-compose", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":         "Nodes created but failed to update docker-compose",
+				"success_count": successCount,
+				"error_count":   errorCount,
+				"results":       results,
+			})
+			return
+		}
+
+		// 启动容器 (如果 enabled=true)
+		if req.Enabled && h.dockerClientService != nil {
+			if err := h.dockerClientService.StartComposeProject("easy-node"); err != nil {
+				zap.L().Error("Failed to start containers", zap.Error(err))
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "Batch create completed",
+		"total":         req.Count,
+		"success_count": successCount,
+		"error_count":   errorCount,
+		"results":       results,
 	})
 }
