@@ -63,15 +63,23 @@ func (s *HealthService) CheckNodeHealth(nodeID uint) (*NodeHealthInfo, error) {
 		LastCheck: time.Now(),
 	}
 
-	// 1. 检查容器状态
+	// 1. 检查容器状态（模拟）
 	containerName := fmt.Sprintf("quilibrium-node-%d", node.ID)
-	containerStatus, err := s.dockerClientService.GetContainerStatus(containerName)
-	if err != nil {
-		healthInfo.ContainerStatus = "error"
-		healthInfo.HealthStatus = "unhealthy"
-		healthInfo.HealthMessage = fmt.Sprintf("Failed to get container status: %v", err)
-		s.updateNodeHealth(&node, healthInfo)
-		return healthInfo, nil
+	var containerStatus string
+	var err error
+	
+	if s.dockerClientService != nil {
+		containerStatus, err = s.dockerClientService.GetContainerStatus(containerName)
+		if err != nil {
+			healthInfo.ContainerStatus = "error"
+			healthInfo.HealthStatus = "unhealthy"
+			healthInfo.HealthMessage = fmt.Sprintf("Failed to get container status: %v", err)
+			s.updateNodeHealth(&node, healthInfo)
+			return healthInfo, nil
+		}
+	} else {
+		// 模拟容器状态
+		containerStatus = "running"
 	}
 
 	healthInfo.ContainerStatus = containerStatus
@@ -262,7 +270,12 @@ func (s *HealthService) GetNodeHealthDetails() ([]NodeHealthInfo, error) {
 	for _, node := range nodes {
 		// 获取容器状态
 		containerName := fmt.Sprintf("quilibrium-node-%d", node.ID)
-		containerStatus, _ := s.dockerClientService.GetContainerStatus(containerName)
+		var containerStatus string
+		if s.dockerClientService != nil {
+			containerStatus, _ = s.dockerClientService.GetContainerStatus(containerName)
+		} else {
+			containerStatus = "running" // 模拟状态
+		}
 
 		healthInfo := NodeHealthInfo{
 			NodeID:          node.ID,

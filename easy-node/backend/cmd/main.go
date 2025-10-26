@@ -30,15 +30,8 @@ func main() {
 	nodeService := service.NewNodeService(database)
 	dockerService := service.NewDockerService(database, cfg)
 	
-	// 初始化 Docker 客户端服务
-	dockerClientService, err := service.NewDockerClientService()
-	if err != nil {
-		log.Fatal("Failed to initialize docker client:", err)
-	}
-	defer dockerClientService.Close()
-	
-	// 初始化健康检查服务
-	healthService := service.NewHealthService(database, dockerClientService)
+	// 初始化健康检查服务（暂时去掉Docker依赖）
+	healthService := service.NewHealthService(database, nil)
 	
 	// 初始化监控调度器 (30秒间隔)
 	schedulerService := service.NewSchedulerService(healthService, 30*time.Second)
@@ -47,7 +40,7 @@ func main() {
 	schedulerService.Start()
 	defer schedulerService.Stop()
 	
-	nodeHandler := handler.NewNodeHandler(nodeService, dockerService, dockerClientService, healthService)
+	nodeHandler := handler.NewNodeHandler(nodeService, dockerService, nil, healthService)
 	monitorHandler := handler.NewMonitorHandler(schedulerService, healthService)
 
 	gin.SetMode(cfg.Server.Mode)

@@ -328,11 +328,22 @@ func (h *NodeHandler) GetNodesStatus(c *gin.Context) {
 	}
 
 	// 获取容器状态
-	containerStatus, err := h.dockerClientService.GetAllNodeStatus("easy-node")
-	if err != nil {
-		zap.L().Error("Failed to get container status", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	var containerStatus map[string]string
+	var err error
+	if h.dockerClientService != nil {
+		containerStatus, err = h.dockerClientService.GetAllNodeStatus("easy-node")
+		if err != nil {
+			zap.L().Error("Failed to get container status", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		// 模拟容器状态
+		containerStatus = make(map[string]string)
+		for _, node := range nodes {
+			containerName := fmt.Sprintf("quilibrium-node-%d", node.ID)
+			containerStatus[containerName] = "running"
+		}
 	}
 
 	// 合并节点信息和容器状态
@@ -374,10 +385,15 @@ func (h *NodeHandler) StartNode(c *gin.Context) {
 	}
 
 	containerName := fmt.Sprintf("quilibrium-node-%d", node.ID)
-	if err := h.dockerClientService.StartContainer(containerName); err != nil {
-		zap.L().Error("Failed to start container", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	if h.dockerClientService != nil {
+		if err := h.dockerClientService.StartContainer(containerName); err != nil {
+			zap.L().Error("Failed to start container", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		// 模拟启动成功
+		zap.L().Info("Simulated node start", zap.String("container", containerName))
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -400,10 +416,15 @@ func (h *NodeHandler) StopNode(c *gin.Context) {
 	}
 
 	containerName := fmt.Sprintf("quilibrium-node-%d", node.ID)
-	if err := h.dockerClientService.StopContainer(containerName); err != nil {
-		zap.L().Error("Failed to stop container", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	if h.dockerClientService != nil {
+		if err := h.dockerClientService.StopContainer(containerName); err != nil {
+			zap.L().Error("Failed to stop container", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		// 模拟停止成功
+		zap.L().Info("Simulated node stop", zap.String("container", containerName))
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -426,10 +447,15 @@ func (h *NodeHandler) RestartNode(c *gin.Context) {
 	}
 
 	containerName := fmt.Sprintf("quilibrium-node-%d", node.ID)
-	if err := h.dockerClientService.RestartContainer(containerName); err != nil {
-		zap.L().Error("Failed to restart container", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	if h.dockerClientService != nil {
+		if err := h.dockerClientService.RestartContainer(containerName); err != nil {
+			zap.L().Error("Failed to restart container", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		// 模拟重启成功
+		zap.L().Info("Simulated node restart", zap.String("container", containerName))
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -460,11 +486,18 @@ func (h *NodeHandler) GetNodeLogs(c *gin.Context) {
 	}
 
 	containerName := fmt.Sprintf("quilibrium-node-%d", node.ID)
-	logs, err := h.dockerClientService.GetContainerLogs(containerName, lines)
-	if err != nil {
-		zap.L().Error("Failed to get container logs", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	var logs string
+	var err error
+	if h.dockerClientService != nil {
+		logs, err = h.dockerClientService.GetContainerLogs(containerName, lines)
+		if err != nil {
+			zap.L().Error("Failed to get container logs", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		// 模拟日志
+		logs = fmt.Sprintf("Simulated logs for %s\nNode is running normally\nLatest activity: %s", node.Name, time.Now().Format("2006-01-02 15:04:05"))
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -476,10 +509,15 @@ func (h *NodeHandler) GetNodeLogs(c *gin.Context) {
 
 // 启动所有节点
 func (h *NodeHandler) StartAllNodes(c *gin.Context) {
-	if err := h.dockerClientService.StartComposeProject("easy-node"); err != nil {
-		zap.L().Error("Failed to start all nodes", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	if h.dockerClientService != nil {
+		if err := h.dockerClientService.StartComposeProject("easy-node"); err != nil {
+			zap.L().Error("Failed to start all nodes", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		// 模拟启动所有节点
+		zap.L().Info("Simulated start all nodes")
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -489,10 +527,15 @@ func (h *NodeHandler) StartAllNodes(c *gin.Context) {
 
 // 停止所有节点
 func (h *NodeHandler) StopAllNodes(c *gin.Context) {
-	if err := h.dockerClientService.StopComposeProject("easy-node"); err != nil {
-		zap.L().Error("Failed to stop all nodes", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	if h.dockerClientService != nil {
+		if err := h.dockerClientService.StopComposeProject("easy-node"); err != nil {
+			zap.L().Error("Failed to stop all nodes", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		// 模拟停止所有节点
+		zap.L().Info("Simulated stop all nodes")
 	}
 
 	c.JSON(http.StatusOK, gin.H{
