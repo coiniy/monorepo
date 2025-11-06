@@ -74,11 +74,12 @@ type ProverJoin struct {
 	Proof []byte
 
 	// Private fields
-	keyManager     keys.KeyManager
-	hypergraph     hypergraph.Hypergraph
-	rdfMultiprover *schema.RDFMultiprover
-	frameProver    crypto.FrameProver
-	frameStore     store.ClockStore
+	keyManager      keys.KeyManager
+	hypergraph      hypergraph.Hypergraph
+	rdfMultiprover  *schema.RDFMultiprover
+	frameProver     crypto.FrameProver
+	frameStore      store.ClockStore
+	allowDuplicates bool
 }
 
 func NewProverJoin(
@@ -91,6 +92,7 @@ func NewProverJoin(
 	rdfMultiprover *schema.RDFMultiprover,
 	frameProver crypto.FrameProver,
 	frameStore store.ClockStore,
+	allowDuplicates bool,
 ) (*ProverJoin, error) {
 	return &ProverJoin{
 		Filters:         filters,
@@ -102,6 +104,7 @@ func NewProverJoin(
 		rdfMultiprover:  rdfMultiprover,
 		frameProver:     frameProver,
 		frameStore:      frameStore,
+		allowDuplicates: allowDuplicates,
 	}, nil
 }
 
@@ -149,6 +152,10 @@ func (p *ProverJoin) Materialize(
 		}
 	}
 
+	// Always start in joining state so the confirmation flow can run,
+	// even if duplicates are allowed in dev mode.
+	statusByte := byte(0)
+
 	if !proverExists {
 		// Create new prover entry
 		proverTree = &qcrypto.VectorCommitmentTree{}
@@ -165,20 +172,22 @@ func (p *ProverJoin) Materialize(
 		if err != nil {
 			return nil, errors.Wrap(err, "materialize")
 		}
+	}
 
-		// Store status (0 = joining since we have allocations joining)
-		err = p.rdfMultiprover.Set(
-			GLOBAL_RDF_SCHEMA,
-			intrinsics.GLOBAL_INTRINSIC_ADDRESS[:],
-			"prover:Prover",
-			"Status",
-			[]byte{0},
-			proverTree,
-		)
-		if err != nil {
-			return nil, errors.Wrap(err, "materialize")
-		}
+	// Ensure prover status reflects desired mode (joining vs active)
+	err = p.rdfMultiprover.Set(
+		GLOBAL_RDF_SCHEMA,
+		intrinsics.GLOBAL_INTRINSIC_ADDRESS[:],
+		"prover:Prover",
+		"Status",
+		[]byte{statusByte},
+		proverTree,
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "materialize")
+	}
 
+	if !proverExists {
 		// Store available storage (initially 0)
 		availableStorageBytes := make([]byte, 8)
 		binary.BigEndian.PutUint64(availableStorageBytes, 0)
@@ -347,6 +356,9 @@ func (p *ProverJoin) Materialize(
 
 	// Create ProverAllocation entries for each filter
 	for _, filter := range p.Filters {
+		if len(filter) == 0 {
+			continue
+		}
 		// Calculate allocation address: poseidon.Hash(publicKey || filter)
 		allocationAddressBI, err := poseidon.HashBytes(
 			slices.Concat([]byte("PROVER_ALLOCATION"), publicKey, filter),
@@ -378,7 +390,7 @@ func (p *ProverJoin) Materialize(
 			intrinsics.GLOBAL_INTRINSIC_ADDRESS[:],
 			"allocation:ProverAllocation",
 			"Status",
-			[]byte{0},
+			[]byte{statusByte},
 			allocationTree,
 		)
 		if err != nil {
@@ -421,7 +433,10 @@ func (p *ProverJoin) Materialize(
 			hgstate.VertexAddsDiscriminator,
 		)
 		if err == nil && originalAllocationVertex != nil {
-			prior = originalAllocationVertex.(*tries.VectorCommitmentTree)
+			if existingTree, ok := originalAllocationVertex.(*tries.VectorCommitmentTree); ok {
+				prior = existingTree
+				allocationTree = existingTree
+			}
 		}
 
 		// Create allocation vertex
@@ -779,7 +794,7 @@ func (p *ProverJoin) Verify(frameNumber uint64) (valid bool, err error) {
 		)
 		if err == nil && len(statusData) > 0 {
 			status := statusData[0]
-			if status != 4 {
+			if status != 4 && !p.allowDuplicates {
 				// Prover is in some other state - cannot join
 				return false, errors.Wrap(
 					errors.New("prover already exists in non-left state"),

@@ -103,7 +103,7 @@ func (p *ProverJoin) FromBytes(data []byte) error {
 
 	// Note: Runtime dependencies are not available here
 	// They need to be injected separately after deserialization
-	converted, err := ProverJoinFromProtobuf(pb, nil, nil, nil, nil, nil, nil)
+	converted, err := ProverJoinFromProtobuf(pb, nil, nil, nil, nil, nil, nil, false)
 	if err != nil {
 		return errors.Wrap(err, "from bytes")
 	}
@@ -372,6 +372,7 @@ func GlobalRequestFromBytes(
 	keyManager keys.KeyManager,
 	frameProver crypto.FrameProver,
 	frameStore store.ClockStore,
+	allowDuplicates bool,
 ) (interface{}, error) {
 	pb := &protobufs.MessageRequest{}
 	if err := pb.FromCanonicalBytes(data); err != nil {
@@ -386,6 +387,7 @@ func GlobalRequestFromBytes(
 		keyManager,
 		frameProver,
 		frameStore,
+		allowDuplicates,
 	)
 }
 

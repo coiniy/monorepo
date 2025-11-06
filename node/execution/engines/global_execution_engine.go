@@ -548,6 +548,11 @@ func (e *GlobalExecutionEngine) tryGetIntrinsic(address []byte) (
 
 	if !exists {
 		// Load the global intrinsic
+		intrinsicLogger := e.logger
+		if intrinsicLogger != nil {
+			intrinsicLogger = intrinsicLogger.Named("global_intrinsic")
+		}
+
 		loaded, err := global.LoadGlobalIntrinsic(
 			address,
 			e.hypergraph,
@@ -558,6 +563,8 @@ func (e *GlobalExecutionEngine) tryGetIntrinsic(address []byte) (
 			e.rewardIssuance,
 			e.proverRegistry,
 			e.blsConstructor,
+			intrinsicLogger,
+			e.config.Network == 99,
 		)
 		if err != nil {
 			return nil, errors.Wrap(err, "try get intrinsic")

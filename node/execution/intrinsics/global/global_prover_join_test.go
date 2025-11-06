@@ -54,7 +54,7 @@ func TestProverJoin_Verify(t *testing.T) {
 
 	// Create the prover join operation
 	rdfMultiprover := createMockRDFMultiprover()
-	proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore)
+	proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore, false)
 	require.NoError(t, err)
 	proverJoin.Proof = make([]byte, 516)
 
@@ -122,7 +122,7 @@ func TestProverJoin_Verify(t *testing.T) {
 		[]byte("signature"),
 		joinDomain.Bytes(),
 	).Return(false, nil)
-	proverJoin, err = global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore)
+	proverJoin, err = global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore, false)
 	require.NoError(t, err)
 	proverJoin.PublicKeySignatureBLS48581 = global.BLS48581SignatureWithProofOfPossession{
 		Signature:    []byte("signature"),
@@ -159,7 +159,7 @@ func TestProverJoin_Verify(t *testing.T) {
 		[]byte("BLS48_POP_SK"),
 	).Return(true, nil)
 
-	proverJoin, err = global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore)
+	proverJoin, err = global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore, false)
 	require.NoError(t, err)
 	proverJoin.PublicKeySignatureBLS48581 = global.BLS48581SignatureWithProofOfPossession{
 		Signature:    []byte("signature"),
@@ -198,7 +198,7 @@ func TestProverJoin_Verify(t *testing.T) {
 		[]byte("BLS48_POP_SK"),
 	).Return(true, nil)
 
-	proverJoin, err = global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore)
+	proverJoin, err = global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore, false)
 	require.NoError(t, err)
 	proverJoin.Proof = make([]byte, 516)
 	proverJoin.PublicKeySignatureBLS48581 = global.BLS48581SignatureWithProofOfPossession{
@@ -277,7 +277,7 @@ func TestProverJoin_Materialize(t *testing.T) {
 
 		// Create the prover join operation
 		rdfMultiprover := createMockRDFMultiprover()
-		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore)
+		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore, false)
 		require.NoError(t, err)
 
 		// Set up the signature data
@@ -376,7 +376,7 @@ func TestProverJoin_Materialize(t *testing.T) {
 
 		// Create the prover join operation
 		rdfMultiprover := createMockRDFMultiprover()
-		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore)
+		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore, false)
 		require.NoError(t, err)
 
 		// Set up the signature data
@@ -437,7 +437,7 @@ func TestProverJoin_Materialize(t *testing.T) {
 
 		// Create the prover join operation
 		rdfMultiprover := createMockRDFMultiprover()
-		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore)
+		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore, false)
 		require.NoError(t, err)
 
 		// Set up the signature data
@@ -470,7 +470,7 @@ func TestProverJoin_Materialize(t *testing.T) {
 
 		// Create the prover join operation
 		rdfMultiprover := createMockRDFMultiprover()
-		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore)
+		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore, false)
 		require.NoError(t, err)
 
 		// Set up the signature data with nil public key (will cause poseidon hash error)
@@ -591,7 +591,7 @@ func TestProverJoin_Materialize(t *testing.T) {
 
 		// Create the prover join operation
 		rdfMultiprover := createMockRDFMultiprover()
-		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore)
+		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, mockFrameProver, mockFrameStore, false)
 		require.NoError(t, err)
 
 		// Set up the signature data
@@ -638,7 +638,7 @@ func TestProverJoin_GetCost(t *testing.T) {
 
 	// Create the prover join operation
 	rdfMultiprover := createMockRDFMultiprover()
-	proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, &mocks.MockFrameProver{}, mockFrameStore)
+	proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, mockKeyManager, mockHypergraph, rdfMultiprover, &mocks.MockFrameProver{}, mockFrameStore, false)
 	require.NoError(t, err)
 
 	// Set up the signature data manually

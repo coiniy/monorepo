@@ -127,7 +127,7 @@ func TestGlobalProverOperations_Integration(t *testing.T) {
 		// Create a fresh hypergraph for ProverJoin (no pre-existing prover)
 		hg, _, rm := createHypergraph(t)
 
-		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, keyManager, hg, rm, vdf.NewWesolowskiFrameProver(zap.L()), frameStore)
+		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, keyManager, hg, rm, vdf.NewWesolowskiFrameProver(zap.L()), frameStore, false)
 		require.NoError(t, err)
 		challenge := sha3.Sum256(make([]byte, 516))
 		addr, _ := poseidon.HashBytes(signer.Public().([]byte))
@@ -149,7 +149,7 @@ func TestGlobalProverOperations_Integration(t *testing.T) {
 		// Create a fresh hypergraph for ProverJoin (no pre-existing prover)
 		hg, _, rm := createHypergraph(t)
 
-		proverJoin, err := global.NewProverJoin([][]byte{filter, filter2}, frameNumber, nil, nil, keyManager, hg, rm, vdf.NewWesolowskiFrameProver(zap.L()), frameStore)
+		proverJoin, err := global.NewProverJoin([][]byte{filter, filter2}, frameNumber, nil, nil, keyManager, hg, rm, vdf.NewWesolowskiFrameProver(zap.L()), frameStore, false)
 		require.NoError(t, err)
 		challenge := sha3.Sum256(make([]byte, 516))
 		addr, _ := poseidon.HashBytes(signer.Public().([]byte))
@@ -462,14 +462,14 @@ func TestGlobalProverOperations_Integration(t *testing.T) {
 		require.NotNil(t, differentPubKey)
 
 		// Attempt to verify a signature created with the original key using the different key
-		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, keyManager, hg, rm, vdf.NewWesolowskiFrameProver(zap.L()), frameStore)
+		proverJoin, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, keyManager, hg, rm, vdf.NewWesolowskiFrameProver(zap.L()), frameStore, false)
 		require.NoError(t, err)
 		err = proverJoin.Prove(frameNumber)
 		require.NoError(t, err)
 
 		// Replace the key manager with the different one
 		// This simulates an attempt to verify with a different key
-		proverJoin2, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, differentKeyManager, hg, rm, vdf.NewWesolowskiFrameProver(zap.L()), frameStore)
+		proverJoin2, err := global.NewProverJoin([][]byte{filter}, frameNumber, nil, nil, differentKeyManager, hg, rm, vdf.NewWesolowskiFrameProver(zap.L()), frameStore, false)
 		require.NoError(t, err)
 		proverJoin2.PublicKeySignatureBLS48581 = proverJoin.PublicKeySignatureBLS48581
 		proverJoin2.PublicKeySignatureBLS48581.PublicKey = []byte("foobar")

@@ -45,7 +45,7 @@ func (p *GlobalVotingProvider) SendProposal(
 	p.engine.frameStoreMu.Unlock()
 
 	p.engine.logger.Info(
-		"sending global proposal",
+		"【全局帧】【发布】准备广播帧提案",
 		zap.Uint64("frame_number", (*proposal).Header.FrameNumber),
 	)
 
@@ -94,6 +94,24 @@ func (p *GlobalVotingProvider) DecideAndSendVote(
 	if err != nil {
 		p.engine.logger.Error("could not get prover list", zap.Error(err))
 		return GlobalPeerID{}, nil, errors.Wrap(err, "decide and send vote")
+	}
+
+	if len(provers) == 0 && p.engine.config.P2P.Network == 99 {
+		self := p.engine.getProverAddress()
+		if len(self) == 0 {
+			p.engine.logger.Error(
+				"【单机开发网】【投票】没有可用的本地证明者地址",
+			)
+			return GlobalPeerID{}, nil, errors.Wrap(
+				errors.New("no provers available"),
+				"decide and send vote",
+			)
+		}
+		p.engine.logger.Info(
+			"【单机开发网】【投票】候选集为空，回退使用本节点",
+			zap.String("self", hex.EncodeToString(self)),
+		)
+		provers = [][]byte{self}
 	}
 
 	// Check proposals in prover order
@@ -214,9 +232,9 @@ func (p *GlobalVotingProvider) DecideAndSendVote(
 	p.mu.Unlock()
 
 	p.engine.logger.Info(
-		"decided and sent vote",
+		"【全局帧】【投票】已完成本地投票并广播",
 		zap.Uint64("frame_number", chosenProposal.Header.FrameNumber),
-		zap.String("for_proposal", chosenID),
+		zap.String("proposal_id", chosenID),
 	)
 
 	return GlobalPeerID{ID: proposerID}, &vote, nil
@@ -426,9 +444,9 @@ func (p *GlobalVotingProvider) FinalizeVotes(
 	}
 
 	p.engine.logger.Info(
-		"finalized votes",
+		"【全局帧】【落票】构建聚合签名完成",
 		zap.Uint64("frame_number", finalizedFrame.Header.FrameNumber),
-		zap.Int("signatures", len(signatures)),
+		zap.Int("signature_count", len(signatures)),
 	)
 
 	return &finalizedFrame, chosenProposerID, nil
@@ -501,7 +519,7 @@ func (p *GlobalVotingProvider) SendConfirmation(
 	}
 
 	p.engine.logger.Info(
-		"sent confirmation",
+		"【全局帧】【确认】已广播最终确认",
 		zap.Uint64("frame_number", copiedFinalized.Header.FrameNumber),
 	)
 

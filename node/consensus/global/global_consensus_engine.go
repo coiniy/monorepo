@@ -262,6 +262,25 @@ func NewGlobalConsensusEngine(
 		txLockMap:                   make(map[uint64]map[string]map[string]*LockedTransaction),
 	}
 
+	if config.P2P.Network == 99 {
+		if devRegistry, ok := proverRegistry.(interface {
+			UseDevMode([]byte, []byte)
+		}); ok {
+			_, _, publicKey, proverAddress := engine.GetProvingKey(config.Engine)
+			if len(proverAddress) == 0 {
+				logger.Warn(
+					"devnet detected but local prover address is unavailable",
+				)
+			} else {
+				devRegistry.UseDevMode(proverAddress, publicKey)
+			}
+		} else {
+			logger.Warn(
+				"devnet detected but prover registry does not support dev mode override",
+			)
+		}
+	}
+
 	if config.Engine.AlertKey != "" {
 		alertPublicKey, err := hex.DecodeString(config.Engine.AlertKey)
 		if err != nil {
@@ -1160,20 +1179,45 @@ func (e *GlobalConsensusEngine) workerPatterns() (
 		return nil, nil, nil
 	}
 
+	// Determine how many workers we expect filters for
+	workerCount := ec.DataWorkerCount
+	if workerCount == 0 && len(ec.DataWorkerFilters) > 0 {
+		workerCount = len(ec.DataWorkerFilters)
+	}
+
 	// Convert DataWorkerFilters (hex strings) -> [][]byte
-	var filters [][]byte
-	for _, hs := range ec.DataWorkerFilters {
-		b, err := hex.DecodeString(strings.TrimPrefix(hs, "0x"))
-		if err != nil {
-			// keep empty on decode error
-			b = []byte{}
-			e.logger.Warn(
-				"invalid DataWorkerFilters entry",
-				zap.String("value", hs),
-				zap.Error(err),
-			)
+	filters := make([][]byte, workerCount)
+	for i := 0; i < workerCount; i++ {
+		var filterBytes []byte
+		if i < len(ec.DataWorkerFilters) {
+			hs := strings.TrimSpace(ec.DataWorkerFilters[i])
+			if hs != "" {
+				b, err := hex.DecodeString(strings.TrimPrefix(hs, "0x"))
+				if err != nil {
+					e.logger.Warn(
+						"invalid DataWorkerFilters entry",
+						zap.String("value", hs),
+						zap.Error(err),
+					)
+					b = nil
+				}
+				if b != nil {
+					filterBytes = b
+				}
+			}
 		}
-		filters = append(filters, b)
+
+		if len(filterBytes) == 0 && e.config.P2P.Network == 99 {
+			// Deterministically derive a unique filter for dev-network workers
+			filterBytes = make([]byte, 32)
+			binary.BigEndian.PutUint32(filterBytes[len(filterBytes)-4:], uint32(i+1))
+		}
+
+		if filterBytes == nil {
+			filterBytes = []byte{}
+		}
+
+		filters[i] = filterBytes
 	}
 
 	// If explicit worker multiaddrs are set, use those
@@ -1204,6 +1248,9 @@ func (e *GlobalConsensusEngine) workerPatterns() (
 	}
 
 	n := ec.DataWorkerCount
+	if n <= 0 {
+		n = len(filters)
+	}
 	p2p := make([]string, n)
 	stream := make([]string, n)
 	for i := 0; i < n; i++ {
@@ -2250,6 +2297,15 @@ func (e *GlobalConsensusEngine) ProposeWorkerJoin(
 		if i == uint32(joins) {
 			break
 		}
+		coreID := core
+		e.logger.Info(
+			"【Join调试】向数据工作线程请求 JoinProof",
+			zap.Uint("core_id", coreID),
+			zap.Int("prover_index", int(i)),
+			zap.String("filter", hex.EncodeToString(filters[i])),
+			zap.String("challenge", hex.EncodeToString(challenge[:])),
+			zap.Uint64("difficulty", uint64(frame.Header.Difficulty)),
+		)
 		wg.Go(func() error {
 			client := protobufs.NewDataIPCServiceClient(svc)
 			resp, err := client.CreateJoinProof(
@@ -2266,6 +2322,12 @@ func (e *GlobalConsensusEngine) ProposeWorkerJoin(
 			}
 
 			results[i] = [516]byte(resp.Response)
+			e.logger.Info(
+				"【Join调试】数据工作线程返回 JoinProof",
+				zap.Uint("core_id", coreID),
+				zap.Int("prover_index", int(i)),
+				zap.Int("proof_length", len(resp.Response)),
+			)
 			return nil
 		})
 		idx++
@@ -2277,6 +2339,10 @@ func (e *GlobalConsensusEngine) ProposeWorkerJoin(
 		e.logger.Debug("failed join proof", zap.Error(err))
 		return errors.Wrap(err, "propose worker join")
 	}
+	e.logger.Info(
+		"【Join调试】全部 JoinProof 生成完成",
+		zap.Int("proof_count", len(results)),
+	)
 
 	join, err := global.NewProverJoin(
 		filters,
@@ -2288,6 +2354,7 @@ func (e *GlobalConsensusEngine) ProposeWorkerJoin(
 		schema.NewRDFMultiprover(&schema.TurtleRDFParser{}, e.inclusionProver),
 		e.frameProver,
 		e.clockStore,
+		e.config.P2P.Network == 99,
 	)
 	if err != nil {
 		e.logger.Error("could not construct join", zap.Error(err))
@@ -2303,6 +2370,12 @@ func (e *GlobalConsensusEngine) ProposeWorkerJoin(
 		e.logger.Error("could not construct join", zap.Error(err))
 		return errors.Wrap(err, "propose worker join")
 	}
+	e.logger.Info(
+		"【Join调试】Join 请求证明生成完成",
+		zap.Uint64("frame_number", frame.Header.FrameNumber),
+		zap.Int("filter_count", len(join.Filters)),
+		zap.Int("proof_bytes", len(join.Proof)),
+	)
 
 	bundle := &protobufs.MessageBundle{
 		Requests: []*protobufs.MessageRequest{
@@ -2314,6 +2387,11 @@ func (e *GlobalConsensusEngine) ProposeWorkerJoin(
 		},
 		Timestamp: time.Now().UnixMilli(),
 	}
+	e.logger.Info(
+		"【Join调试】准备广播 Join 请求",
+		zap.Uint64("frame_number", frame.Header.FrameNumber),
+		zap.Int("request_count", len(bundle.Requests)),
+	)
 
 	msg, err := bundle.ToCanonicalBytes()
 	if err != nil {
@@ -2329,6 +2407,10 @@ func (e *GlobalConsensusEngine) ProposeWorkerJoin(
 		e.logger.Error("could not construct join", zap.Error(err))
 		return errors.Wrap(err, "propose worker join")
 	}
+	e.logger.Info(
+		"【Join调试】已广播 Join 请求",
+		zap.Uint64("frame_number", frame.Header.FrameNumber),
+	)
 
 	e.logger.Debug("submitted join request")
 
@@ -2344,6 +2426,16 @@ func (e *GlobalConsensusEngine) DecideWorkerJoins(
 		e.logger.Debug("cannot decide, no frame")
 		return errors.New("not ready")
 	}
+	frameNumber := uint64(0)
+	if frame != nil && frame.Header != nil {
+		frameNumber = frame.Header.FrameNumber
+	}
+	e.logger.Info(
+		"【Join调试】评估 Join 决策",
+		zap.Int("reject_count", len(reject)),
+		zap.Int("confirm_count", len(confirm)),
+		zap.Uint64("frame_number", frameNumber),
+	)
 
 	_, err := e.keyManager.GetSigningKey("q-prover-key")
 	if err != nil {
@@ -2374,6 +2466,11 @@ func (e *GlobalConsensusEngine) DecideWorkerJoins(
 				e.logger.Error("could not construct reject", zap.Error(err))
 				return errors.Wrap(err, "decide worker joins")
 			}
+			e.logger.Info(
+				"【Join调试】生成 Reject 消息",
+				zap.Uint64("frame_number", frame.Header.FrameNumber),
+				zap.String("filter", hex.EncodeToString(r)),
+			)
 
 			bundle.Requests = append(bundle.Requests, &protobufs.MessageRequest{
 				Request: &protobufs.MessageRequest_Reject{
@@ -2402,6 +2499,11 @@ func (e *GlobalConsensusEngine) DecideWorkerJoins(
 				e.logger.Error("could not construct confirm", zap.Error(err))
 				return errors.Wrap(err, "decide worker joins")
 			}
+			e.logger.Info(
+				"【Join调试】生成 Confirm 消息",
+				zap.Uint64("frame_number", frame.Header.FrameNumber),
+				zap.String("filter", hex.EncodeToString(r)),
+			)
 
 			bundle.Requests = append(bundle.Requests, &protobufs.MessageRequest{
 				Request: &protobufs.MessageRequest_Confirm{
@@ -2428,7 +2530,11 @@ func (e *GlobalConsensusEngine) DecideWorkerJoins(
 		return errors.Wrap(err, "decide worker joins")
 	}
 
-	e.logger.Debug("submitted join decisions")
+	e.logger.Info(
+		"【Join调试】已广播 Join 决策",
+		zap.Uint64("frame_number", frame.Header.FrameNumber),
+		zap.Int("request_count", len(bundle.Requests)),
+	)
 
 	return nil
 }

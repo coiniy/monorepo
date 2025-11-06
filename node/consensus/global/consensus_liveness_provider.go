@@ -77,8 +77,8 @@ func (p *GlobalLivenessProvider) Collect(
 
 	frameNumber++
 
-	p.engine.logger.Debug(
-		"collected messages, validating",
+	p.engine.logger.Info(
+		"【全局帧】【收集】进入校验阶段",
 		zap.Int("message_count", len(messages)),
 	)
 
@@ -90,6 +90,12 @@ func (p *GlobalLivenessProvider) Collect(
 
 		acceptedMessages = append(acceptedMessages, message)
 	}
+
+	p.engine.logger.Info(
+		"【全局帧】【收集】校验完成，生成承诺",
+		zap.Int("accepted_count", len(acceptedMessages)),
+		zap.Uint64("next_frame_number", frameNumber),
+	)
 
 	err := p.engine.executionManager.Unlock()
 	if err != nil {
@@ -179,6 +185,12 @@ func (p *GlobalLivenessProvider) Collect(
 	// Update metrics
 	shardCommitmentsCollected.Set(float64(collected))
 
+	p.engine.logger.Info(
+		"【全局帧】【收集】已完成全局状态承诺",
+		zap.Uint64("frame_number", frameNumber),
+		zap.Int("commit_count", collected),
+	)
+
 	return GlobalCollectedCommitments{
 		frameNumber:    frameNumber,
 		commitmentHash: commitmentHash[:],
@@ -241,7 +253,7 @@ func (p *GlobalLivenessProvider) SendLiveness(
 	}
 
 	p.engine.logger.Info(
-		"sent liveness check",
+		"【全局帧】【存活】已广播存活签名",
 		zap.Uint64("frame_number", collected.frameNumber),
 	)
 

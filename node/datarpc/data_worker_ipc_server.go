@@ -222,12 +222,24 @@ func (r *DataWorkerIPCServer) CreateJoinProof(
 	ctx context.Context,
 	req *protobufs.CreateJoinProofRequest,
 ) (*protobufs.CreateJoinProofResponse, error) {
-	r.logger.Debug("received request to create join proof")
+	r.logger.Info(
+		"【Join调试】worker 收到 JoinProof 请求",
+		zap.Uint32("core_id", r.coreId),
+		zap.Int("id_count", len(req.Ids)),
+		zap.Uint32("difficulty", req.Difficulty),
+		zap.String("challenge", hex.EncodeToString(req.Challenge)),
+		zap.Uint32("prover_index", req.ProverIndex),
+	)
 	proof := r.frameProver.CalculateMultiProof(
 		[32]byte(req.Challenge),
 		req.Difficulty,
 		req.Ids,
 		req.ProverIndex,
+	)
+	r.logger.Info(
+		"【Join调试】worker 已生成 JoinProof",
+		zap.Uint32("core_id", r.coreId),
+		zap.Int("proof_length", len(proof)),
 	)
 
 	return &protobufs.CreateJoinProofResponse{

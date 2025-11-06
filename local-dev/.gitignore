@@ -1,0 +1,4 @@
+bin/node
+logs/*
+config/store/*
+config/worker-store/*

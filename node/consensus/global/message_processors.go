@@ -247,10 +247,9 @@ func (e *GlobalConsensusEngine) handleFrameMessage(message *pb.Message) {
 			return
 		}
 
-		frameIDBI, _ := poseidon.HashBytes(frame.Header.Output)
-		frameID := frameIDBI.FillBytes(make([]byte, 32))
+		frameID := e.globalTimeReel.ComputeFrameID(frame)
 		e.frameStoreMu.Lock()
-		e.frameStore[string(frameID)] = frame
+		e.frameStore[frameID] = frame
 		clone := frame.Clone().(*protobufs.GlobalFrame)
 		e.frameStoreMu.Unlock()
 
@@ -814,10 +813,9 @@ func (e *GlobalConsensusEngine) handleProposal(message *pb.Message) {
 		return
 	}
 
-	frameIDBI, _ := poseidon.HashBytes(frame.Header.Output)
-	frameID := frameIDBI.FillBytes(make([]byte, 32))
+	frameID := e.globalTimeReel.ComputeFrameID(frame)
 	e.frameStoreMu.Lock()
-	e.frameStore[string(frameID)] = frame
+	e.frameStore[frameID] = frame
 	e.frameStoreMu.Unlock()
 
 	// For proposals, we need to identify the proposer differently

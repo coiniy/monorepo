@@ -1,26 +1,29 @@
 // build.rs
-use cc;
 use std::env;
-use std::path::PathBuf;
-use std::process::Command;
 
 fn main() {
   let target = env::var("TARGET").expect("cargo should have set this");
   if target == "aarch64-apple-darwin" {
+      let openssl_prefix =
+          env::var("OPENSSL_PREFIX").unwrap_or_else(|_| "/opt/homebrew/opt/openssl@3".to_string());
+      let openssl_include = format!("{}/include", openssl_prefix);
+      let openssl_lib = format!("{}/lib", openssl_prefix);
+
     cc::Build::new()
         .cpp(true)
         .flag_if_supported("-std=c++17")
         .file("emp_bridge.cpp")
         .flag("-I/usr/local/include/emp-tool/")
         .flag("-I/usr/local/include/emp-ot/")
-        .flag("-I/opt/homebrew/Cellar/openssl@3/3.5.0/include")
+        .flag(&format!("-I{openssl_include}"))
         .flag("-L/usr/local/lib/emp-tool/")
-        .flag("-L/opt/homebrew/Cellar/openssl@3/3.5.0/lib")
+        .flag(&format!("-L{openssl_lib}"))
         .warnings(false)
         .compile("emp_bridge");
 
     println!("cargo:rustc-link-search=native=/usr/local/lib");
     println!("cargo:rustc-link-search=native=/opt/homebrew/lib");
+    println!("cargo:rustc-link-search=native={openssl_lib}");
 
     println!("cargo:rustc-link-lib=static=emp-tool");
 
@@ -82,7 +85,7 @@ fn main() {
     println!("cargo:rerun-if-changed=emp_bridge.cpp");
     println!("cargo:rerun-if-changed=emp_bridge.h");
   } else {
-    panic!("unsupported target {target}");
+    panic!("unsupported target {}", target);
   }
   uniffi::generate_scaffolding("src/lib.udl").expect("uniffi generation failed");
 }

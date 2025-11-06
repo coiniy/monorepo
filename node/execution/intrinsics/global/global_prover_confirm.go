@@ -519,7 +519,7 @@ func (p *ProverConfirm) Verify(frameNumber uint64) (bool, error) {
 		// immediately, for joins after 252840, normal 360 frame wait applies.
 		// If the join frame precedes the genesis frame (e.g. not mainnet), we
 		// ignore the topic altogether
-		if joinFrame >= 252480 || joinFrame <= 244100 {
+		if joinFrame >= 252480 {
 			framesSinceJoin := frameNumber - joinFrame
 			if framesSinceJoin < 360 {
 				return false, errors.Wrap(

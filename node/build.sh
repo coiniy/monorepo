@@ -19,7 +19,11 @@ case "$os_type" in
         # Check if the architecture is ARM
         if [[ "$(uname -m)" == "arm64" ]]; then
             # MacOS ld doesn't support -Bstatic and -Bdynamic, so it's important that there is only a static version of the library
-            go build -ldflags "-linkmode 'external' -extldflags '-L$BINARIES_DIR -L/usr/local/lib/ -L/opt/homebrew/Cellar/openssl@3/3.5.0/lib -lbls48581 -lvdf -lchannel -lferret -lverenc -lbulletproofs -lrpm -ldl -lm -lflint -lgmp -lmpfr -lstdc++ -lcrypto -lssl'" "$@"
+            OPENSSL_PREFIX="${OPENSSL_PREFIX:-/opt/homebrew/opt/openssl@3}"
+            HOMEBREW_LIB_DIR="/opt/homebrew/lib"
+            extra_ldflags="-L$BINARIES_DIR -L/usr/local/lib/ -L$HOMEBREW_LIB_DIR -L${OPENSSL_PREFIX}/lib \
+-lbls48581 -lvdf -lchannel -lferret -lverenc -lbulletproofs -lrpm -ldl -lm -lflint -lgmp -lmpfr -lstdc++ -lcrypto -lssl"
+            go build -ldflags "-linkmode external -extldflags '$extra_ldflags'" "$@"
         else
             echo "Unsupported platform"
             exit 1

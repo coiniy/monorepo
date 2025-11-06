@@ -45,7 +45,7 @@ func (p *AppVotingProvider) SendProposal(
 	}
 
 	p.engine.logger.Info(
-		"sending proposal",
+		"【应用帧】【发布】准备广播帧提案",
 		zap.Uint64("frame_number", (*proposal).Header.FrameNumber),
 		zap.String("prover", hex.EncodeToString((*proposal).Header.Prover)),
 	)
@@ -264,9 +264,9 @@ func (p *AppVotingProvider) DecideAndSendVote(
 	p.mu.Unlock()
 
 	p.engine.logger.Info(
-		"decided and sent vote",
+		"【应用帧】【投票】已完成本地投票并广播",
 		zap.Uint64("frame_number", chosenProposal.Header.FrameNumber),
-		zap.String("for_proposal", chosenID),
+		zap.String("proposal_id", chosenID),
 	)
 
 	// Return the peer ID from the chosen proposal's prover
@@ -627,9 +627,9 @@ func (p *AppVotingProvider) FinalizeVotes(
 	}
 
 	p.engine.logger.Info(
-		"finalized votes",
+		"【应用帧】【落票】聚合签名完成",
 		zap.Uint64("frame_number", finalizedFrame.Header.FrameNumber),
-		zap.Int("signatures", len(signatures)),
+		zap.Int("signature_count", len(signatures)),
 	)
 
 	return &finalizedFrame, chosenProposerID, nil
@@ -683,7 +683,7 @@ func (p *AppVotingProvider) SendConfirmation(
 	}
 
 	p.engine.logger.Info(
-		"sent confirmation",
+		"【应用帧】【确认】已广播最终确认",
 		zap.Uint64("frame_number", copiedFinalized.Header.FrameNumber),
 	)
 

@@ -85,6 +85,64 @@ func NewProverRegistry(logger *zap.Logger, hg hypergraph.Hypergraph) (
 	return registry, nil
 }
 
+// UseDevMode resets the registry to only track the local prover so that
+// development networks (e.g. network 99) can operate without external peers.
+func (r *ProverRegistry) UseDevMode(address []byte, publicKey []byte) {
+	if len(address) == 0 {
+		r.logger.Warn("dev mode requested but local prover address is empty")
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.logger.Info(
+		"initializing prover registry for dev mode",
+		zap.String("address", fmt.Sprintf("%x", address)),
+	)
+
+	r.globalTrie = &tries.RollingFrecencyCritbitTrie{}
+	r.shardTries = make(map[string]*tries.RollingFrecencyCritbitTrie)
+	r.proverCache = make(map[string]*consensus.ProverInfo)
+	r.filterCache = make(map[string][]*consensus.ProverInfo)
+	r.addressToFilters = make(map[string][]string)
+
+	r.insertDevProverLocked(address, publicKey)
+}
+
+func (r *ProverRegistry) insertDevProverLocked(address []byte, publicKey []byte) {
+	addrCopy := append([]byte(nil), address...)
+
+	var pkCopy []byte
+	if len(publicKey) != 0 {
+		pkCopy = append([]byte(nil), publicKey...)
+	}
+
+	info := &consensus.ProverInfo{
+		PublicKey: pkCopy,
+		Address:   addrCopy,
+		Status:    consensus.ProverStatusActive,
+		Allocations: []consensus.ProverAllocationInfo{
+			{
+				Status:                consensus.ProverStatusActive,
+				ConfirmationFilter:    []byte{},
+				LastActiveFrameNumber: r.currentFrame,
+			},
+		},
+	}
+
+	r.proverCache[string(addrCopy)] = info
+	r.filterCache[""] = []*consensus.ProverInfo{info}
+	r.addressToFilters[string(addrCopy)] = []string{""}
+
+	if err := r.addProverToTrie(addrCopy, pkCopy, nil, r.currentFrame); err != nil {
+		r.logger.Debug(
+			"failed to register dev prover in trie",
+			zap.Error(err),
+		)
+	}
+}
+
 // ProcessStateTransition implements ProverRegistry
 func (r *ProverRegistry) ProcessStateTransition(
 	state state.State,

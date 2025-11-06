@@ -1,0 +1,121 @@
+alias: null
+key:
+  keyManagerType: file
+  keyManagerFile:
+    path: config/keys.yml
+    createIfMissing: false
+    encryptionKey: 0f1cde189a39b157ba47e80e84399bf721b0f254019f22a232c19bdd16310427
+p2p:
+  d: 0
+  dLo: 0
+  dHi: 0
+  dScore: 0
+  dOut: 0
+  historyLength: 0
+  historyGossip: 0
+  dLazy: 0
+  gossipFactor: 0
+  gossipRetransmission: 0
+  heartbeatInitialDelay: 0s
+  heartbeatInterval: 0s
+  fanoutTTL: 0s
+  prunePeers: 0
+  pruneBackoff: 0s
+  unsubscribeBackoff: 0s
+  connectors: 0
+  maxPendingConnections: 0
+  connectionTimeout: 0s
+  directConnectTicks: 0
+  directConnectInitialDelay: 0s
+  opportunisticGraftTicks: 0
+  opportunisticGraftPeers: 0
+  graftFloodThreshold: 0s
+  maxIHaveLength: 0
+  maxIHaveMessages: 0
+  maxIDontWantMessages: 0
+  iWantFollowupTime: 0s
+  iDontWantMessageThreshold: 0
+  iDontWantMessageTTL: 0
+  bootstrapPeers: []
+  listenMultiaddr: /ip4/127.0.0.1/udp/8336/quic-v1
+  streamListenMultiaddr: ""
+  peerPrivKey: ba6c1dada29a58149afa84f8d26c7fd084305d1e82418878f7979e52100330afd9917952dab5c7e7203c832ba0f9d8070bbb6b96c9bd2c6a03d32abd69ca1088f9be75be6df0d09116fa52187ff67d94e8927936cf5c66f97d58a028a50d2b2a7c39ae5eeb2a3eabea9e8c98280c6d138280
+  traceLogFile: ""
+  traceLogStdout: false
+  network: 99
+  lowWatermarkConnections: 1
+  highWatermarkConnections: 2
+  directPeers: []
+  grpcServerRateLimit: 0
+  minBootstrapPeers: 0
+  bootstrapParallelism: 0
+  discoveryParallelism: 0
+  discoveryPeerLookupLimit: 0
+  pingTimeout: 0s
+  pingPeriod: 0s
+  pingAttempts: 0
+  validateQueueSize: 0
+  validateWorkers: 0
+  subscriptionQueueSize: 0
+  peerOutboundQueueSize: 0
+engine:
+  provingKeyId: default-proving-key
+  filter: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+  genesisSeed: 726573697374206d7563682c206f626579206c6974746c657c083fb0a4274b1f70e9aa2b3f
+  maxFrames: -1
+  pendingCommitWorkers: 4
+  minimumPeersRequired: 0
+  statsMultiaddr: ""
+  dataWorkerBaseListenMultiaddr: /ip4/127.0.0.1/tcp/%d
+  dataWorkerBaseP2PPort: 51000
+  dataWorkerBaseStreamPort: 61000
+  dataWorkerMemoryLimit: 0
+  dataWorkerP2PMultiaddrs: []
+  dataWorkerStreamMultiaddrs: []
+  dataWorkerCount: 3
+  dataWorkerFilters:
+  - ""
+  - ""
+  - ""
+  multisigProverEnrollmentPaths: []
+  syncTimeout: 0s
+  syncCandidates: 0
+  syncMessageLimits:
+    maxRecvMsgSize: 0
+    maxSendMsgSize: 0
+  enableMasterProxy: false
+  rewardStrategy: ""
+  archiveMode: false
+  delegateAddress: ""
+  allowExcessiveGOMAXPROCS: true
+  blacklist: []
+  alertKey: ""
+  difficulty: 0
+  rebuildstart: ""
+  rebuildend: ""
+  framePublish:
+    mode: ""
+    threshold: 0
+    fragmentation:
+      algorithm: ""
+      reedSolomon:
+        dataShards: 0
+        parityShards: 0
+    ballastSize: 0
+db:
+  path: config/store
+  workerPathPrefix: config/worker-store/%d
+  workerPaths: []
+  noticePercentage: 0
+  warnPercentage: 0
+  terminatePercentage: 0
+  inmemorydonotuse: false
+logger:
+  path: logs
+  maxSize: 50
+  maxBackups: 5
+  maxAge: 10
+  compress: true
+listenGrpcMultiaddr: "/ip4/0.0.0.0/tcp/8337"
+listenRESTMultiaddr: "/ip4/0.0.0.0/tcp/8338"
+logFile: ""

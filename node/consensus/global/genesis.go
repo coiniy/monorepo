@@ -253,10 +253,9 @@ func (e *GlobalConsensusEngine) initializeGenesis() *protobufs.GlobalFrame {
 	}
 
 	// Compute frame ID and store the full frame
-	frameIDBI, _ := poseidon.HashBytes(genesisFrame.Header.Output)
-	frameID := frameIDBI.FillBytes(make([]byte, 32))
+	frameID := e.globalTimeReel.ComputeFrameID(genesisFrame)
 	e.frameStoreMu.Lock()
-	e.frameStore[string(frameID)] = genesisFrame
+	e.frameStore[frameID] = genesisFrame
 	e.frameStoreMu.Unlock()
 
 	// Add to time reel
@@ -264,7 +263,7 @@ func (e *GlobalConsensusEngine) initializeGenesis() *protobufs.GlobalFrame {
 		e.logger.Error("failed to add genesis frame to time reel", zap.Error(err))
 		// Clean up on error
 		e.frameStoreMu.Lock()
-		delete(e.frameStore, string(frameID))
+		delete(e.frameStore, frameID)
 		e.frameStoreMu.Unlock()
 	}
 
@@ -461,10 +460,9 @@ func (e *GlobalConsensusEngine) createStubGenesis() *protobufs.GlobalFrame {
 	}
 
 	// Compute frame ID and store the full frame
-	frameIDBI, _ := poseidon.HashBytes(genesisHeader.Output)
-	frameID := frameIDBI.FillBytes(make([]byte, 32))
+	frameID := e.globalTimeReel.ComputeFrameID(genesisFrame)
 	e.frameStoreMu.Lock()
-	e.frameStore[string(frameID)] = genesisFrame
+	e.frameStore[frameID] = genesisFrame
 	e.frameStoreMu.Unlock()
 
 	// Add to time reel
@@ -472,7 +470,7 @@ func (e *GlobalConsensusEngine) createStubGenesis() *protobufs.GlobalFrame {
 		e.logger.Error("failed to add genesis frame to time reel", zap.Error(err))
 		// Clean up on error
 		e.frameStoreMu.Lock()
-		delete(e.frameStore, string(frameID))
+		delete(e.frameStore, frameID)
 		e.frameStoreMu.Unlock()
 	}
 

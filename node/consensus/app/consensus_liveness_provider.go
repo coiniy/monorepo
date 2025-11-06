@@ -69,7 +69,7 @@ func (p *AppLivenessProvider) Collect(
 	}
 
 	p.engine.logger.Info(
-		"collected messages",
+		"【应用帧】【收集】已完成消息筛选",
 		zap.Int(
 			"total_message_count",
 			len(mixnetMessages)+len(pendingMessages),
@@ -165,7 +165,7 @@ func (p *AppLivenessProvider) SendLiveness(
 	}
 
 	p.engine.logger.Info(
-		"sent liveness check",
+		"【应用帧】【存活】已广播存活签名",
 		zap.Uint64("frame_number", frameNumber),
 	)
 

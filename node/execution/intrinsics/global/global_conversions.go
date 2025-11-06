@@ -150,6 +150,7 @@ func ProverJoinFromProtobuf(
 	keyManager keys.KeyManager,
 	frameProver crypto.FrameProver,
 	frameStore store.ClockStore,
+	allowDuplicates bool,
 ) (*ProverJoin, error) {
 	if pb == nil {
 		return nil, nil
@@ -188,6 +189,7 @@ func ProverJoinFromProtobuf(
 		rdfMultiprover:             nil, // Will be set by caller
 		frameProver:                frameProver,
 		frameStore:                 frameStore,
+		allowDuplicates:            allowDuplicates,
 	}, nil
 }
 
@@ -592,6 +594,7 @@ func GlobalRequestFromProtobuf(
 	keyManager keys.KeyManager,
 	frameProver crypto.FrameProver,
 	frameStore store.ClockStore,
+	allowDuplicates bool,
 ) (interface{}, error) {
 	if pb == nil {
 		return nil, nil
@@ -608,6 +611,7 @@ func GlobalRequestFromProtobuf(
 			keyManager,
 			frameProver,
 			frameStore,
+			allowDuplicates,
 		)
 
 	case *protobufs.MessageRequest_Leave:

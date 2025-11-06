@@ -445,15 +445,29 @@ func (e *GlobalConsensusEngine) evaluateForProposals(
 						allocated = allocation.Status != 4
 						if e.config.P2P.Network != 0 ||
 							data.Frame.Header.FrameNumber > 252840 {
+							threshold := uint64(360)
+							if e.config.P2P.Network == 99 {
+								threshold = 0
+							}
+							pending = allocation.Status ==
+								typesconsensus.ProverStatusJoining &&
+								allocation.JoinFrameNumber+threshold <= data.Frame.Header.FrameNumber
 							e.logger.Debug(
 								"checking pending status of allocation",
 								zap.Int("status", int(allocation.Status)),
 								zap.Uint64("join_frame_number", allocation.JoinFrameNumber),
 								zap.Uint64("frame_number", data.Frame.Header.FrameNumber),
+								zap.Uint64("pending_threshold", threshold),
+								zap.Bool("pending", pending),
 							)
-							pending = allocation.Status ==
-								typesconsensus.ProverStatusJoining &&
-								allocation.JoinFrameNumber+360 <= data.Frame.Header.FrameNumber
+							if pending && e.config.P2P.Network == 99 {
+								e.logger.Info(
+									"【Join调试】单机模式检测到待确认 Join",
+									zap.String("filter", hex.EncodeToString(filter)),
+									zap.Uint64("join_frame_number", allocation.JoinFrameNumber),
+									zap.Uint64("current_frame", data.Frame.Header.FrameNumber),
+								)
+							}
 						}
 					}
 				}

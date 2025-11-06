@@ -6,52 +6,177 @@ import (
 	"slices"
 	"time"
 
+	"github.com/iden3/go-iden3-crypto/poseidon"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
-	"source.quilibrium.com/quilibrium/monorepo/consensus"
+	"source.quilibrium.com/quilibrium/monorepo/consensus/models"
 )
 
-func (g *GlobalFrame) Clone() consensus.Unique {
-	g.Identity()
-	frame := proto.Clone(g)
-	return frame.(*GlobalFrame)
+// Source implements models.QuorumCertificate.
+func (g *QuorumCertificate) Equals(other models.QuorumCertificate) bool {
+	return bytes.Equal(g.Filter, other.GetFilter()) &&
+		g.Rank == other.GetRank() &&
+		g.FrameNumber == other.GetFrameNumber() &&
+		g.Identity() == other.Identity()
 }
 
-func (g *GlobalFrame) Identity() consensus.Identity {
-	return consensus.Identity(g.Header.Output)
+func (
+	g *QuorumCertificate,
+) GetAggregatedSignature() models.AggregatedSignature {
+	return g.AggregateSignature
 }
 
-func (g *GlobalFrame) Rank() uint64 {
-	return g.Header.FrameNumber
+// Source implements models.Unique.
+func (g *QuorumCertificate) Clone() models.Unique {
+	return proto.Clone(g).(*QuorumCertificate)
 }
 
-func (a *AppShardFrame) Clone() consensus.Unique {
-	a.Identity()
-	frame := proto.Clone(a)
-	return frame.(*AppShardFrame)
+// GetSignature implements models.Unique.
+func (g *QuorumCertificate) GetSignature() []byte {
+	return g.AggregateSignature.Signature
 }
 
-func (a *AppShardFrame) Identity() consensus.Identity {
-	return consensus.Identity(a.Header.Output)
+// Source implements models.Unique.
+func (g *QuorumCertificate) Source() models.Identity {
+	return g.AggregateSignature.Identity()
 }
 
-func (a *AppShardFrame) Rank() uint64 {
-	return a.Header.FrameNumber
+// Source implements models.Unique.
+func (g *QuorumCertificate) Identity() models.Identity {
+	return models.Identity(g.Selector)
 }
 
-func (f *FrameVote) Clone() consensus.Unique {
-	f.Identity()
-	frame := proto.Clone(f)
-	return frame.(*FrameVote)
+// Source implements models.TimeoutCertificate.
+func (g *TimeoutCertificate) Equals(other models.TimeoutCertificate) bool {
+	return bytes.Equal(g.Filter, other.GetFilter()) &&
+		g.Rank == other.GetRank() &&
+		slices.Equal(g.LatestRanks, other.GetLatestRanks()) &&
+		g.LatestQuorumCertificate.Equals(other.GetLatestQuorumCert())
 }
 
-func (f *FrameVote) Identity() consensus.Identity {
-	return consensus.Identity(f.PublicKeySignatureBls48581.Signature)
+func (
+	g *TimeoutCertificate,
+) GetAggregatedSignature() models.AggregatedSignature {
+	return g.AggregateSignature
 }
 
-func (f *FrameVote) Rank() uint64 {
-	return f.FrameNumber
+func (
+	g *TimeoutCertificate,
+) GetLatestQuorumCert() models.QuorumCertificate {
+	return g.LatestQuorumCertificate
+}
+
+// Source implements models.Unique.
+func (g *TimeoutCertificate) Clone() models.Unique {
+	return proto.Clone(g).(*TimeoutCertificate)
+}
+
+// GetSignature implements models.Unique.
+func (g *TimeoutCertificate) GetSignature() []byte {
+	return g.AggregateSignature.Signature
+}
+
+// Source implements models.Unique.
+func (g *TimeoutCertificate) Source() models.Identity {
+	return models.Identity(
+		binary.BigEndian.AppendUint64(slices.Clone(g.Filter), g.Rank),
+	)
+}
+
+// Source implements models.Unique.
+func (g *TimeoutCertificate) Identity() models.Identity {
+	return models.Identity(
+		binary.BigEndian.AppendUint64(slices.Clone(g.Filter), g.Rank),
+	)
+}
+
+// GetSignature implements models.Unique.
+func (f *ProposalVote) Clone() models.Unique {
+	return proto.Clone(f).(*ProposalVote)
+}
+
+// GetSignature implements models.Unique.
+func (f *ProposalVote) GetSignature() []byte {
+	return f.PublicKeySignatureBls48581.Signature
+}
+
+// Source implements models.Unique.
+func (f *ProposalVote) Source() models.Identity {
+	return models.Identity(f.Selector)
+}
+
+// GetSignature implements models.Unique.
+func (f *ProposalVote) Identity() models.Identity {
+	return models.Identity(f.PublicKeySignatureBls48581.Address)
+}
+
+func (g *GlobalFrame) Clone() models.Unique {
+	return proto.Clone(g).(*GlobalFrame)
+}
+
+// GetRank implements models.Unique.
+func (g *GlobalFrame) GetRank() uint64 {
+	return g.Header.Rank
+}
+
+// GetSignature implements models.Unique.
+func (g *GlobalFrame) GetSignature() []byte {
+	return g.Header.PublicKeySignatureBls48581.Signature
+}
+
+// GetTimestamp implements models.Unique.
+func (g *GlobalFrame) GetTimestamp() uint64 {
+	return uint64(g.Header.Timestamp)
+}
+
+// Identity implements models.Unique.
+func (g *GlobalFrame) Identity() models.Identity {
+	selectorBI, err := poseidon.HashBytes(g.Header.Output)
+	if err != nil {
+		return ""
+	}
+
+	return models.Identity(selectorBI.FillBytes(make([]byte, 32)))
+}
+
+// Source implements models.Unique.
+func (g *GlobalFrame) Source() models.Identity {
+	return g.Header.PublicKeySignatureBls48581.Identity()
+}
+
+func (a *AppShardFrame) Clone() models.Unique {
+	return proto.Clone(a).(*AppShardFrame)
+}
+
+// GetRank implements models.Unique.
+func (a *AppShardFrame) GetRank() uint64 {
+	return a.Header.Rank
+}
+
+// GetSignature implements models.Unique.
+func (a *AppShardFrame) GetSignature() []byte {
+	return a.Header.PublicKeySignatureBls48581.Signature
+}
+
+// GetTimestamp implements models.Unique.
+func (a *AppShardFrame) GetTimestamp() uint64 {
+	return uint64(a.Header.Timestamp)
+}
+
+// Identity implements models.Unique.
+func (a *AppShardFrame) Identity() models.Identity {
+	selectorBI, err := poseidon.HashBytes(a.Header.Output)
+	if err != nil {
+		return ""
+	}
+
+	return models.Identity(selectorBI.FillBytes(make([]byte, 32)))
+}
+
+// Source implements models.Unique.
+func (a *AppShardFrame) Source() models.Identity {
+	return a.Header.PublicKeySignatureBls48581.Identity()
 }
 
 func (s *SeniorityMerge) ToCanonicalBytes() ([]byte, error) {
@@ -1492,6 +1617,11 @@ func (g *GlobalFrameHeader) ToCanonicalBytes() ([]byte, error) {
 		return nil, errors.Wrap(err, "to canonical bytes")
 	}
 
+	// Write rank
+	if err := binary.Write(buf, binary.BigEndian, g.Rank); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+
 	// Write timestamp
 	if err := binary.Write(buf, binary.BigEndian, g.Timestamp); err != nil {
 		return nil, errors.Wrap(err, "to canonical bytes")
@@ -1601,6 +1731,11 @@ func (g *GlobalFrameHeader) FromCanonicalBytes(data []byte) error {
 
 	// Read frame_number
 	if err := binary.Read(buf, binary.BigEndian, &g.FrameNumber); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+
+	// Read rank
+	if err := binary.Read(buf, binary.BigEndian, &g.Rank); err != nil {
 		return errors.Wrap(err, "from canonical bytes")
 	}
 
@@ -2091,11 +2226,11 @@ func (p *ProverLivenessCheck) FromCanonicalBytes(data []byte) error {
 	return nil
 }
 
-func (f *FrameVote) ToCanonicalBytes() ([]byte, error) {
+func (f *ProposalVote) ToCanonicalBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	// Write type prefix
-	if err := binary.Write(buf, binary.BigEndian, FrameVoteType); err != nil {
+	if err := binary.Write(buf, binary.BigEndian, ProposalVoteType); err != nil {
 		return nil, errors.Wrap(err, "to canonical bytes")
 	}
 
@@ -2111,32 +2246,29 @@ func (f *FrameVote) ToCanonicalBytes() ([]byte, error) {
 		return nil, errors.Wrap(err, "to canonical bytes")
 	}
 
+	// Write rank
+	if err := binary.Write(buf, binary.BigEndian, f.Rank); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+
 	// Write frame_number
 	if err := binary.Write(buf, binary.BigEndian, f.FrameNumber); err != nil {
 		return nil, errors.Wrap(err, "to canonical bytes")
 	}
 
-	// Write proposer
+	// Write selector
 	if err := binary.Write(
 		buf,
 		binary.BigEndian,
-		uint32(len(f.Proposer)),
+		uint32(len(f.Selector)),
 	); err != nil {
 		return nil, errors.Wrap(err, "to canonical bytes")
 	}
-	if _, err := buf.Write(f.Proposer); err != nil {
+	if _, err := buf.Write(f.Selector); err != nil {
 		return nil, errors.Wrap(err, "to canonical bytes")
 	}
 
-	// Write approve
-	approve := uint8(0)
-	if f.Approve {
-		approve = 1
-	}
-	if err := binary.Write(buf, binary.BigEndian, approve); err != nil {
-		return nil, errors.Wrap(err, "to canonical bytes")
-	}
-
+	// Write timestamp
 	if err := binary.Write(buf, binary.BigEndian, f.Timestamp); err != nil {
 		return nil, errors.Wrap(err, "to canonical bytes")
 	}
@@ -2166,7 +2298,7 @@ func (f *FrameVote) ToCanonicalBytes() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (f *FrameVote) FromCanonicalBytes(data []byte) error {
+func (f *ProposalVote) FromCanonicalBytes(data []byte) error {
 	buf := bytes.NewBuffer(data)
 
 	// Read and verify type prefix
@@ -2174,7 +2306,7 @@ func (f *FrameVote) FromCanonicalBytes(data []byte) error {
 	if err := binary.Read(buf, binary.BigEndian, &typePrefix); err != nil {
 		return errors.Wrap(err, "from canonical bytes")
 	}
-	if typePrefix != FrameVoteType {
+	if typePrefix != ProposalVoteType {
 		return errors.Wrap(
 			errors.New("invalid type prefix"),
 			"from canonical bytes",
@@ -2191,27 +2323,25 @@ func (f *FrameVote) FromCanonicalBytes(data []byte) error {
 		return errors.Wrap(err, "from canonical bytes")
 	}
 
+	// Read rank
+	if err := binary.Read(buf, binary.BigEndian, &f.Rank); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+
 	// Read frame_number
 	if err := binary.Read(buf, binary.BigEndian, &f.FrameNumber); err != nil {
 		return errors.Wrap(err, "from canonical bytes")
 	}
 
-	// Read proposer
-	var proposerLen uint32
-	if err := binary.Read(buf, binary.BigEndian, &proposerLen); err != nil {
+	// Read selector
+	var selectorLen uint32
+	if err := binary.Read(buf, binary.BigEndian, &selectorLen); err != nil {
 		return errors.Wrap(err, "from canonical bytes")
 	}
-	f.Proposer = make([]byte, proposerLen)
-	if _, err := buf.Read(f.Proposer); err != nil {
+	f.Selector = make([]byte, selectorLen)
+	if _, err := buf.Read(f.Selector); err != nil {
 		return errors.Wrap(err, "from canonical bytes")
 	}
-
-	// Read approve
-	var approve uint8
-	if err := binary.Read(buf, binary.BigEndian, &approve); err != nil {
-		return errors.Wrap(err, "from canonical bytes")
-	}
-	f.Approve = approve != 0
 
 	// Read timestamp
 	if err := binary.Read(buf, binary.BigEndian, &f.Timestamp); err != nil {
@@ -2239,14 +2369,183 @@ func (f *FrameVote) FromCanonicalBytes(data []byte) error {
 	return nil
 }
 
-func (f *FrameConfirmation) ToCanonicalBytes() ([]byte, error) {
+func (f *TimeoutState) ToCanonicalBytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+
+	// Write type prefix
+	if err := binary.Write(buf, binary.BigEndian, TimeoutStateType); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+
+	// Write latest_quorum_certificate
+	latestQCBytes, err := f.LatestQuorumCertificate.ToCanonicalBytes()
+	if err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+	if err := binary.Write(
+		buf,
+		binary.BigEndian,
+		uint32(len(latestQCBytes)),
+	); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+	if _, err := buf.Write(latestQCBytes); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+
+	// Write prior_rank_timeout_certificate
+	if f.PriorRankTimeoutCertificate != nil {
+		priorTCBytes, err := f.PriorRankTimeoutCertificate.ToCanonicalBytes()
+		if err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+		if err := binary.Write(
+			buf,
+			binary.BigEndian,
+			uint32(len(priorTCBytes)),
+		); err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+		if _, err := buf.Write(priorTCBytes); err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+	} else {
+		if err := binary.Write(buf, binary.BigEndian, uint32(0)); err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+	}
+
+	// Write vote
+	if f.Vote != nil {
+		voteBytes, err := f.Vote.ToCanonicalBytes()
+		if err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+		if err := binary.Write(
+			buf,
+			binary.BigEndian,
+			uint32(len(voteBytes)),
+		); err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+		if _, err := buf.Write(voteBytes); err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+	} else {
+		if err := binary.Write(buf, binary.BigEndian, uint32(0)); err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+	}
+
+	// Write timeout_tick
+	if err := binary.Write(buf, binary.BigEndian, f.TimeoutTick); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+
+	// Write timestamp
+	if err := binary.Write(buf, binary.BigEndian, f.Timestamp); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+
+	return buf.Bytes(), nil
+}
+
+func (f *TimeoutState) FromCanonicalBytes(data []byte) error {
+	buf := bytes.NewBuffer(data)
+
+	// Read and verify type prefix
+	var typePrefix uint32
+	if err := binary.Read(buf, binary.BigEndian, &typePrefix); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+	if typePrefix != TimeoutStateType {
+		return errors.Wrap(
+			errors.New("invalid type prefix"),
+			"from canonical bytes",
+		)
+	}
+
+	// Read latest_quorum_certificate
+	var latestQuorumCertLen uint32
+	if err := binary.Read(
+		buf,
+		binary.BigEndian,
+		&latestQuorumCertLen,
+	); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+	if latestQuorumCertLen > 0 {
+		latestQuorumCertBytes := make([]byte, latestQuorumCertLen)
+		if _, err := buf.Read(latestQuorumCertBytes); err != nil {
+			return errors.Wrap(err, "from canonical bytes")
+		}
+		f.LatestQuorumCertificate = &QuorumCertificate{}
+		if err := f.LatestQuorumCertificate.FromCanonicalBytes(
+			latestQuorumCertBytes,
+		); err != nil {
+			return errors.Wrap(err, "from canonical bytes")
+		}
+	}
+
+	// Read prior_rank_timeout_certificate
+	var priorRankTimeoutCertLen uint32
+	if err := binary.Read(
+		buf,
+		binary.BigEndian,
+		&priorRankTimeoutCertLen,
+	); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+	if priorRankTimeoutCertLen > 0 {
+		priorRankTimeoutBytes := make([]byte, priorRankTimeoutCertLen)
+		if _, err := buf.Read(priorRankTimeoutBytes); err != nil {
+			return errors.Wrap(err, "from canonical bytes")
+		}
+		f.PriorRankTimeoutCertificate = &TimeoutCertificate{}
+		if err := f.PriorRankTimeoutCertificate.FromCanonicalBytes(
+			priorRankTimeoutBytes,
+		); err != nil {
+			return errors.Wrap(err, "from canonical bytes")
+		}
+	}
+
+	// Read vote
+	var voteLen uint32
+	if err := binary.Read(buf, binary.BigEndian, &voteLen); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+	if voteLen > 0 {
+		voteBytes := make([]byte, voteLen)
+		if _, err := buf.Read(voteBytes); err != nil {
+			return errors.Wrap(err, "from canonical bytes")
+		}
+		f.Vote = &ProposalVote{}
+		if err := f.Vote.FromCanonicalBytes(voteBytes); err != nil {
+			return errors.Wrap(err, "from canonical bytes")
+		}
+	}
+
+	// Read timeout_tick
+	if err := binary.Read(buf, binary.BigEndian, &f.TimeoutTick); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+
+	// Read timestamp
+	if err := binary.Read(buf, binary.BigEndian, &f.Timestamp); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+
+	return nil
+}
+
+func (f *QuorumCertificate) ToCanonicalBytes() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	// Write type prefix
 	if err := binary.Write(
 		buf,
 		binary.BigEndian,
-		FrameConfirmationType,
+		QuorumCertificateType,
 	); err != nil {
 		return nil, errors.Wrap(err, "to canonical bytes")
 	}
@@ -2260,6 +2559,11 @@ func (f *FrameConfirmation) ToCanonicalBytes() ([]byte, error) {
 		return nil, errors.Wrap(err, "to canonical bytes")
 	}
 	if _, err := buf.Write(f.Filter); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+
+	// Write rank
+	if err := binary.Write(buf, binary.BigEndian, f.Rank); err != nil {
 		return nil, errors.Wrap(err, "to canonical bytes")
 	}
 
@@ -2309,7 +2613,7 @@ func (f *FrameConfirmation) ToCanonicalBytes() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (f *FrameConfirmation) FromCanonicalBytes(data []byte) error {
+func (f *QuorumCertificate) FromCanonicalBytes(data []byte) error {
 	buf := bytes.NewBuffer(data)
 
 	// Read and verify type prefix
@@ -2317,7 +2621,7 @@ func (f *FrameConfirmation) FromCanonicalBytes(data []byte) error {
 	if err := binary.Read(buf, binary.BigEndian, &typePrefix); err != nil {
 		return errors.Wrap(err, "from canonical bytes")
 	}
-	if typePrefix != FrameConfirmationType {
+	if typePrefix != QuorumCertificateType {
 		return errors.Wrap(
 			errors.New("invalid type prefix"),
 			"from canonical bytes",
@@ -2331,6 +2635,11 @@ func (f *FrameConfirmation) FromCanonicalBytes(data []byte) error {
 	}
 	f.Filter = make([]byte, filterLen)
 	if _, err := buf.Read(f.Filter); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+
+	// Read rank
+	if err := binary.Read(buf, binary.BigEndian, &f.Rank); err != nil {
 		return errors.Wrap(err, "from canonical bytes")
 	}
 
@@ -2366,6 +2675,187 @@ func (f *FrameConfirmation) FromCanonicalBytes(data []byte) error {
 		}
 		f.AggregateSignature = &BLS48581AggregateSignature{}
 		if err := f.AggregateSignature.FromCanonicalBytes(sigBytes); err != nil {
+			return errors.Wrap(err, "from canonical bytes")
+		}
+	}
+
+	return nil
+}
+
+func (t *TimeoutCertificate) ToCanonicalBytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+
+	// Write type prefix
+	if err := binary.Write(
+		buf,
+		binary.BigEndian,
+		TimeoutCertificateType,
+	); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+
+	// Write filter
+	if err := binary.Write(
+		buf,
+		binary.BigEndian,
+		uint32(len(t.Filter)),
+	); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+	if _, err := buf.Write(t.Filter); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+
+	// Write rank
+	if err := binary.Write(buf, binary.BigEndian, t.Rank); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+
+	// Write latest_ranks
+	if err := binary.Write(
+		buf,
+		binary.BigEndian,
+		uint32(len(t.LatestRanks)),
+	); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+	for _, r := range t.LatestRanks {
+		if err := binary.Write(buf, binary.BigEndian, r); err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+	}
+
+	// Write latest_quorum_certificate
+	if t.LatestQuorumCertificate != nil {
+		latestQCBytes, err := t.LatestQuorumCertificate.ToCanonicalBytes()
+		if err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+		if err := binary.Write(
+			buf,
+			binary.BigEndian,
+			uint32(len(latestQCBytes)),
+		); err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+		if _, err := buf.Write(latestQCBytes); err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+	} else {
+		if err := binary.Write(buf, binary.BigEndian, uint32(0)); err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+	}
+
+	// Write timestamp
+	if err := binary.Write(buf, binary.BigEndian, t.Timestamp); err != nil {
+		return nil, errors.Wrap(err, "to canonical bytes")
+	}
+
+	// Write aggregate_signature
+	if t.AggregateSignature != nil {
+		sigBytes, err := t.AggregateSignature.ToCanonicalBytes()
+		if err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+		if err := binary.Write(
+			buf,
+			binary.BigEndian,
+			uint32(len(sigBytes)),
+		); err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+		if _, err := buf.Write(sigBytes); err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+	} else {
+		if err := binary.Write(buf, binary.BigEndian, uint32(0)); err != nil {
+			return nil, errors.Wrap(err, "to canonical bytes")
+		}
+	}
+
+	return buf.Bytes(), nil
+}
+
+func (t *TimeoutCertificate) FromCanonicalBytes(data []byte) error {
+	buf := bytes.NewBuffer(data)
+
+	// Read and verify type prefix
+	var typePrefix uint32
+	if err := binary.Read(buf, binary.BigEndian, &typePrefix); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+	if typePrefix != TimeoutCertificateType {
+		return errors.Wrap(
+			errors.New("invalid type prefix"),
+			"from canonical bytes",
+		)
+	}
+
+	// Read filter
+	var filterLen uint32
+	if err := binary.Read(buf, binary.BigEndian, &filterLen); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+	t.Filter = make([]byte, filterLen)
+	if _, err := buf.Read(t.Filter); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+
+	// Read rank
+	if err := binary.Read(buf, binary.BigEndian, &t.Rank); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+
+	// Read latest_ranks
+	var latestRanksCount uint32
+	if err := binary.Read(buf, binary.BigEndian, &latestRanksCount); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+	t.LatestRanks = make([]uint64, latestRanksCount)
+	if err := binary.Read(buf, binary.BigEndian, &t.LatestRanks); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+
+	// Read latest_quorum_certificate
+	var latestQuorumCertLen uint32
+	if err := binary.Read(
+		buf,
+		binary.BigEndian,
+		&latestQuorumCertLen,
+	); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+	if latestQuorumCertLen > 0 {
+		latestQuorumCertBytes := make([]byte, latestQuorumCertLen)
+		if _, err := buf.Read(latestQuorumCertBytes); err != nil {
+			return errors.Wrap(err, "from canonical bytes")
+		}
+		t.LatestQuorumCertificate = &QuorumCertificate{}
+		if err := t.LatestQuorumCertificate.FromCanonicalBytes(
+			latestQuorumCertBytes,
+		); err != nil {
+			return errors.Wrap(err, "from canonical bytes")
+		}
+	}
+
+	// Read timestamp
+	if err := binary.Read(buf, binary.BigEndian, &t.Timestamp); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+
+	// Read aggregate_signature
+	var sigLen uint32
+	if err := binary.Read(buf, binary.BigEndian, &sigLen); err != nil {
+		return errors.Wrap(err, "from canonical bytes")
+	}
+	if sigLen > 0 {
+		sigBytes := make([]byte, sigLen)
+		if _, err := buf.Read(sigBytes); err != nil {
+			return errors.Wrap(err, "from canonical bytes")
+		}
+		t.AggregateSignature = &BLS48581AggregateSignature{}
+		if err := t.AggregateSignature.FromCanonicalBytes(sigBytes); err != nil {
 			return errors.Wrap(err, "from canonical bytes")
 		}
 	}
@@ -3881,21 +4371,19 @@ func (p *ProverLivenessCheck) GetSignatureDomain() []byte {
 	return slices.Concat([]byte("PROVER_LIVENESS"), p.Filter)
 }
 
-var _ ValidatableMessage = (*FrameVote)(nil)
+var _ ValidatableMessage = (*ProposalVote)(nil)
 
-func (f *FrameVote) Validate() error {
+func (f *ProposalVote) Validate() error {
 	if f == nil {
 		return errors.Wrap(errors.New("nil frame vote"), "validate")
 	}
 
-	// Frame number is uint64, any value is valid
+	// Rank and frame number is uint64, any value is valid
 
-	// Proposer should be 32 bytes
-	if len(f.Proposer) != 32 {
-		return errors.Wrap(errors.New("invalid proposer length"), "validate")
+	// Selector should be 32 bytes
+	if len(f.Selector) != 32 {
+		return errors.Wrap(errors.New("invalid selector length"), "validate")
 	}
-
-	// Approve is bool, any value is valid
 
 	// Signature must be present
 	if f.PublicKeySignatureBls48581 == nil {
@@ -3910,14 +4398,14 @@ func (f *FrameVote) Validate() error {
 	return nil
 }
 
-var _ ValidatableMessage = (*FrameConfirmation)(nil)
+var _ ValidatableMessage = (*QuorumCertificate)(nil)
 
-func (f *FrameConfirmation) Validate() error {
+func (f *QuorumCertificate) Validate() error {
 	if f == nil {
 		return errors.Wrap(errors.New("nil frame confirmation"), "validate")
 	}
 
-	// Frame number is uint64, any value is valid
+	// Rank and frame number is uint64, any value is valid
 
 	// Selector should be 32 bytes
 	if len(f.Selector) != 32 {

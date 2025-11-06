@@ -49,10 +49,10 @@ func (p *GlobalLeaderProvider) GetNextLeaders(
 	}
 
 	if len(leaders) > 0 {
-		p.engine.logger.Debug(
-			"determined next global leaders",
-			zap.Int("count", len(leaders)),
-			zap.String("first", hex.EncodeToString(leaders[0].ID)),
+		p.engine.logger.Info(
+			"【全局帧】【选主】完成下一轮候选者排序",
+			zap.Int("leader_count", len(leaders)),
+			zap.String("top_leader", hex.EncodeToString(leaders[0].ID)),
 		)
 	}
 
@@ -72,9 +72,34 @@ func (p *GlobalLeaderProvider) ProveNextState(
 		return nil, errors.Wrap(errors.New("nil prior frame"), "prove next state")
 	}
 
+	// Get prover index
+	provers, err := p.engine.proverRegistry.GetActiveProvers(nil)
+	if err != nil {
+		frameProvingTotal.WithLabelValues("error").Inc()
+		return nil, errors.Wrap(err, "prove next state")
+	}
+
+	proverIndex := uint8(0)
+	found := false
+	for i, prover := range provers {
+		if bytes.Equal(prover.Address, p.engine.getProverAddress()) {
+			proverIndex = uint8(i)
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return nil, errors.Wrap(
+			errors.New("not a prover"),
+			"prove next state",
+		)
+	}
+
+	frameNumber := (*prior).Header.FrameNumber + 1
 	p.engine.logger.Info(
-		"proving next global state",
-		zap.Uint64("frame_number", (*prior).Header.FrameNumber+1),
+		"【全局帧】【构建】开始生成新帧头",
+		zap.Uint64("frame_number", frameNumber),
 	)
 
 	// Get proving key
@@ -95,28 +120,14 @@ func (p *GlobalLeaderProvider) ProveNextState(
 	)
 
 	p.engine.currentDifficultyMu.Lock()
-	p.engine.logger.Debug(
-		"next difficulty for frame",
+	p.engine.logger.Info(
+		"【全局帧】【构建】已计算目标难度",
+		zap.Uint64("frame_number", frameNumber),
 		zap.Uint32("previous_difficulty", p.engine.currentDifficulty),
 		zap.Uint64("next_difficulty", difficulty),
 	)
 	p.engine.currentDifficulty = uint32(difficulty)
 	p.engine.currentDifficultyMu.Unlock()
-
-	// Get prover index
-	provers, err := p.engine.proverRegistry.GetActiveProvers(nil)
-	if err != nil {
-		frameProvingTotal.WithLabelValues("error").Inc()
-		return nil, errors.Wrap(err, "prove next state")
-	}
-
-	proverIndex := uint8(0)
-	for i, prover := range provers {
-		if bytes.Equal(prover.Address, p.engine.getProverAddress()) {
-			proverIndex = uint8(i)
-			break
-		}
-	}
 
 	// Prove the global frame header
 	newHeader, err := p.engine.frameProver.ProveGlobalFrameHeader(
@@ -139,8 +150,8 @@ func (p *GlobalLeaderProvider) ProveNextState(
 		0,
 		len(p.engine.collectedMessages),
 	)
-	p.engine.logger.Debug(
-		"including messages",
+	p.engine.logger.Info(
+		"【全局帧】【构建】将业务消息写入帧",
 		zap.Int("message_count", len(p.engine.collectedMessages)),
 	)
 	for _, msgData := range p.engine.collectedMessages {
@@ -189,7 +200,8 @@ func (p *GlobalLeaderProvider) ProveNextState(
 	}
 
 	p.engine.logger.Info(
-		"included requests in global frame",
+		"【全局帧】【构建】新帧打包完成",
+		zap.Uint64("frame_number", frameNumber),
 		zap.Int("request_count", len(requests)),
 	)
 

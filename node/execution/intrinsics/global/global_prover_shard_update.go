@@ -3,6 +3,7 @@ package global
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"math"
 	"math/big"
 	"slices"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/iden3/go-iden3-crypto/poseidon"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 	"source.quilibrium.com/quilibrium/monorepo/node/execution/intrinsics/token"
 	hgstate "source.quilibrium.com/quilibrium/monorepo/node/execution/state/hypergraph"
 	"source.quilibrium.com/quilibrium/monorepo/protobufs"
@@ -40,6 +42,7 @@ type ProverShardUpdate struct {
 	rewardIssuance consensus.RewardIssuance
 	proverRegistry consensus.ProverRegistry
 	blsConstructor crypto.BlsConstructor
+	logger         *zap.Logger
 }
 
 func NewProverShardUpdate(
@@ -51,6 +54,7 @@ func NewProverShardUpdate(
 	rewardIssuance consensus.RewardIssuance,
 	proverRegistry consensus.ProverRegistry,
 	blsConstructor crypto.BlsConstructor,
+	logger *zap.Logger,
 ) (*ProverShardUpdate, error) {
 	return &ProverShardUpdate{
 		FrameHeader:    frameHeader,
@@ -61,6 +65,7 @@ func NewProverShardUpdate(
 		rewardIssuance: rewardIssuance,
 		proverRegistry: proverRegistry,
 		blsConstructor: blsConstructor,
+		logger:         logger,
 	}, nil
 }
 
@@ -380,6 +385,13 @@ func (p *ProverShardUpdate) applyReward(
 	share *big.Int,
 ) error {
 	if share == nil || share.Sign() == 0 {
+		if p.logger != nil {
+			p.logger.Debug(
+				"【奖励】本帧没有可分配奖励",
+				zap.Uint64("frame_number", frameNumber),
+				zap.String("prover", hex.EncodeToString(prover.Address)),
+			)
+		}
 		// Nothing to distribute for this prover
 		return nil
 	}
@@ -436,8 +448,20 @@ func (p *ProverShardUpdate) applyReward(
 		return errors.Wrap(err, "get reward balance")
 	}
 
-	currentBalance := new(big.Int).SetBytes(currentBalanceBytes)
-	currentBalance.Add(currentBalance, share)
+	prevBalance := new(big.Int).SetBytes(currentBalanceBytes)
+	currentBalance := new(big.Int).Add(prevBalance, share)
+
+	if p.logger != nil {
+		p.logger.Info(
+			"【奖励】计算挖矿奖励",
+			zap.Uint64("frame_number", frameNumber),
+			zap.String("prover", hex.EncodeToString(prover.Address)),
+			zap.String("shard_filter", hex.EncodeToString(filter)),
+			zap.String("reward_share_quil", share.String()),
+			zap.String("prev_balance_quil", prevBalance.String()),
+			zap.String("next_balance_quil", currentBalance.String()),
+		)
+	}
 
 	balanceBytes := make([]byte, 32)
 	currentBalance.FillBytes(balanceBytes)
@@ -469,6 +493,16 @@ func (p *ProverShardUpdate) applyReward(
 		vertex,
 	); err != nil {
 		return errors.Wrap(err, "set reward vertex")
+	}
+
+	if p.logger != nil {
+		p.logger.Info(
+			"【奖励】挖矿奖励已写入状态树",
+			zap.Uint64("frame_number", frameNumber),
+			zap.String("prover", hex.EncodeToString(prover.Address)),
+			zap.String("reward_address", hex.EncodeToString(rewardAddress)),
+			zap.String("reward_share_quil", share.String()),
+		)
 	}
 
 	return nil

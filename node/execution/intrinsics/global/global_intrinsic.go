@@ -9,6 +9,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
 	observability "source.quilibrium.com/quilibrium/monorepo/node/execution/intrinsics"
 	"source.quilibrium.com/quilibrium/monorepo/protobufs"
 	"source.quilibrium.com/quilibrium/monorepo/types/consensus"
@@ -36,6 +37,8 @@ type GlobalIntrinsic struct {
 	rewardIssuance      consensus.RewardIssuance
 	proverRegistry      consensus.ProverRegistry
 	blsConstructor      crypto.BlsConstructor
+	logger              *zap.Logger
+	allowDuplicateJoins bool
 }
 
 var GLOBAL_RDF_SCHEMA = `BASE <https://types.quilibrium.com/schema-repository/>
@@ -256,6 +259,7 @@ func (a *GlobalIntrinsic) Validate(
 			a.keyManager,
 			a.frameProver,
 			a.frameStore,
+			a.allowDuplicateJoins,
 		)
 		if err != nil {
 			observability.ValidateErrors.WithLabelValues(
@@ -633,6 +637,11 @@ func (a *GlobalIntrinsic) Validate(
 			return errors.Wrap(err, "validate")
 		}
 
+		var shardLogger *zap.Logger
+		if a.logger != nil {
+			shardLogger = a.logger.Named("prover_shard_update")
+		}
+
 		op, err := NewProverShardUpdate(
 			pbHeader,
 			a.keyManager,
@@ -642,6 +651,7 @@ func (a *GlobalIntrinsic) Validate(
 			a.rewardIssuance,
 			a.proverRegistry,
 			a.blsConstructor,
+			shardLogger,
 		)
 		if err != nil {
 			observability.ValidateErrors.WithLabelValues(
@@ -740,6 +750,7 @@ func (a *GlobalIntrinsic) InvokeStep(
 			a.keyManager,
 			a.frameProver,
 			a.frameStore,
+			a.allowDuplicateJoins,
 		)
 		if err != nil {
 			observability.InvokeStepErrors.WithLabelValues(
@@ -1447,6 +1458,7 @@ func (a *GlobalIntrinsic) tryLockJoin(frameNumber uint64, input []byte) (
 		a.keyManager,
 		a.frameProver,
 		a.frameStore,
+		a.allowDuplicateJoins,
 	)
 	if err != nil {
 		observability.LockErrors.WithLabelValues(
@@ -1830,6 +1842,8 @@ func LoadGlobalIntrinsic(
 	rewardIssuance consensus.RewardIssuance,
 	proverRegistry consensus.ProverRegistry,
 	blsConstructor crypto.BlsConstructor,
+	logger *zap.Logger,
+	allowDuplicateJoins bool,
 ) (*GlobalIntrinsic, error) {
 	// Verify the address is the global intrinsic address
 	if !bytes.Equal(address, intrinsics.GLOBAL_INTRINSIC_ADDRESS[:]) {
@@ -1857,6 +1871,8 @@ func LoadGlobalIntrinsic(
 		rewardIssuance:      rewardIssuance,
 		proverRegistry:      proverRegistry,
 		blsConstructor:      blsConstructor,
+		logger:              logger,
+		allowDuplicateJoins: allowDuplicateJoins,
 	}, nil
 }
 

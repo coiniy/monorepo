@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"time"
@@ -47,10 +48,10 @@ func (p *AppLeaderProvider) GetNextLeaders(
 	}
 
 	if len(leaders) > 0 {
-		p.engine.logger.Debug(
-			"determined next leaders",
-			zap.Int("count", len(leaders)),
-			zap.String("first", hex.EncodeToString(leaders[0].ID)),
+		p.engine.logger.Info(
+			"【应用帧】【选主】完成候选排序",
+			zap.Int("leader_count", len(leaders)),
+			zap.String("top_leader", hex.EncodeToString(leaders[0].ID)),
 		)
 	}
 
@@ -70,6 +71,28 @@ func (p *AppLeaderProvider) ProveNextState(
 	if prior == nil || *prior == nil {
 		frameProvingTotal.WithLabelValues(p.engine.appAddressHex, "error").Inc()
 		return nil, errors.Wrap(errors.New("nil prior frame"), "prove next state")
+	}
+
+	// Get prover index
+	provers, err := p.engine.proverRegistry.GetActiveProvers(p.engine.appAddress)
+	if err != nil {
+		frameProvingTotal.WithLabelValues("error").Inc()
+		return nil, errors.Wrap(err, "prove next state")
+	}
+
+	found := false
+	for _, prover := range provers {
+		if bytes.Equal(prover.Address, p.engine.getProverAddress()) {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return nil, errors.Wrap(
+			errors.New("not a prover"),
+			"prove next state",
+		)
 	}
 
 	// Get collected messages to include in frame
@@ -92,10 +115,11 @@ func (p *AppLeaderProvider) ProveNextState(
 	// Update pending messages metric
 	pendingMessagesCount.WithLabelValues(p.engine.appAddressHex).Set(0)
 
+	frameNumber := (*prior).Header.FrameNumber + 1
 	p.engine.logger.Info(
-		"proving next state",
+		"【应用帧】【构建】开始生成新帧",
+		zap.Uint64("frame_number", frameNumber),
 		zap.Int("message_count", len(messages)),
-		zap.Uint64("frame_number", (*prior).Header.FrameNumber+1),
 	)
 
 	// Prove the frame

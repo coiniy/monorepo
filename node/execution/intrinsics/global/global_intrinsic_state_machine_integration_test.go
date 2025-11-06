@@ -120,7 +120,7 @@ func TestProverJoinConfirmFlow(t *testing.T) {
 		joinFrame := uint64(252840)
 
 		// Create and prove join
-		proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore)
+		proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore, false)
 		require.NoError(t, err)
 		err = proverJoin.Prove(joinFrame)
 		require.NoError(t, err)
@@ -174,7 +174,7 @@ func TestProverJoinRejectFlow(t *testing.T) {
 		joinFrame := uint64(252840)
 
 		// Create and prove join
-		proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore)
+		proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore, false)
 		require.NoError(t, err)
 		err = proverJoin.Prove(joinFrame)
 		require.NoError(t, err)
@@ -214,7 +214,7 @@ func TestProverPauseResumeFlow(t *testing.T) {
 
 	// First join and confirm to get to active state
 	joinFrame := uint64(252840)
-	proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore)
+	proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore, false)
 	require.NoError(t, err)
 	err = proverJoin.Prove(joinFrame)
 	require.NoError(t, err)
@@ -276,7 +276,7 @@ func TestProverLeaveFlow(t *testing.T) {
 
 	// First join and confirm to get to active state
 	joinFrame := uint64(252840)
-	proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore)
+	proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore, false)
 	require.NoError(t, err)
 	err = proverJoin.Prove(joinFrame)
 	require.NoError(t, err)
@@ -349,7 +349,7 @@ func TestProverLeaveRejectFlow(t *testing.T) {
 
 	// First join and confirm to get to active state
 	joinFrame := uint64(252840)
-	proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore)
+	proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore, false)
 	require.NoError(t, err)
 	err = proverJoin.Prove(joinFrame)
 	require.NoError(t, err)
@@ -405,7 +405,7 @@ func TestProverTimingEdgeCases(t *testing.T) {
 		joinFrame := uint64(252000)
 
 		// Create and prove join
-		proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore)
+		proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore, false)
 		require.NoError(t, err)
 		err = proverJoin.Prove(joinFrame)
 		require.NoError(t, err)
@@ -440,7 +440,7 @@ func TestProverTimingEdgeCases(t *testing.T) {
 	t.Run("Pause timeout causes implicit leave", func(t *testing.T) {
 		// First get to active state
 		joinFrame := uint64(252840)
-		proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore)
+		proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore, false)
 		require.NoError(t, err)
 		err = proverJoin.Prove(joinFrame)
 		require.NoError(t, err)
@@ -484,7 +484,7 @@ func TestProverInvalidStateTransitions(t *testing.T) {
 
 	// Join first
 	joinFrame := uint64(252840)
-	proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore)
+	proverJoin, err := global.NewProverJoin([][]byte{filter}, joinFrame, nil, nil, keyManager, hg, rdfMultiprover, vdf.NewWesolowskiFrameProver(zap.L()), frameStore, false)
 	require.NoError(t, err)
 	err = proverJoin.Prove(joinFrame)
 	require.NoError(t, err)
